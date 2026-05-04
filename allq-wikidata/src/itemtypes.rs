@@ -92,6 +92,8 @@ pub struct SearchItemsByInstanceOfOptions {
     pub candidate_limit: Option<usize>,
     pub include_subclasses: bool,
     pub debug_query: bool,
+    pub cache_only: bool,
+    pub force_fetch: bool,
 }
 
 impl Default for SearchItemsByInstanceOfOptions {
@@ -101,6 +103,8 @@ impl Default for SearchItemsByInstanceOfOptions {
             candidate_limit: None,
             include_subclasses: true,
             debug_query: false,
+            cache_only: false,
+            force_fetch: false,
         }
     }
 }
@@ -163,6 +167,8 @@ pub async fn search_items_by_instance_of(
             candidate_limit: None,
             include_subclasses,
             debug_query: false,
+            cache_only: false,
+            force_fetch: false,
         },
     )
         .await
@@ -173,10 +179,51 @@ pub async fn search_items_by_instance_of_with_options(
     query: &str,
     options: SearchItemsByInstanceOfOptions,
 ) -> anyhow::Result<Vec<WikidataItemSearchResult>> {
+    anyhow::ensure!(
+        !(options.cache_only && options.force_fetch),
+        "cache-only and force-fetch cannot be used together"
+    );
+
     let type_qid = normalize_item_qid(type_qid)?;
     let query = normalize_search_query(query)?;
     let output_limit = normalize_limit(options.output_limit);
     let candidate_limit = normalize_candidate_limit(options.candidate_limit, output_limit);
+    let cache_key = search_items_by_instance_of_cache_key(
+        &type_qid,
+        query,
+        output_limit,
+        candidate_limit,
+        options.include_subclasses,
+    )?;
+
+    if !options.force_fetch {
+        let cache_client = WikidataClient::new_local_only().await?;
+
+        if let Some(cache) = cache_client.cache_as_ref() {
+            if let Some(entry) = cache.get(&cache_key).await? {
+                if options.debug_query {
+                    eprintln!("debug: search-item cache hit");
+                    eprintln!("debug: cache_key={cache_key}");
+                }
+
+                let s = entry.value().clone();
+                let rows = serde_json::from_str::<Vec<WikidataItemSearchResult>>(&s)?;
+                return Ok(rows);
+            }
+        }
+
+        if options.debug_query {
+            eprintln!("debug: search-item cache miss");
+            eprintln!("debug: cache_key={cache_key}");
+        }
+
+        if options.cache_only {
+            anyhow::bail!("search-item result was not found in the local cache");
+        }
+    } else if options.debug_query {
+        eprintln!("debug: search-item force-fetch enabled; skipping cache read");
+        eprintln!("debug: cache_key={cache_key}");
+    }
 
     let sparql = search_items_by_instance_of_query(
         &type_qid,
@@ -208,7 +255,18 @@ pub async fn search_items_by_instance_of_with_options(
         eprintln!("debug: SPARQL result bindings={binding_count}");
     }
 
-    parse_item_search_results(&res)
+    let rows = parse_item_search_results(&res)?;
+
+    if let Some(cache) = client.cache_as_ref() {
+        let s = serde_json::to_string(&rows)?;
+        cache.insert(cache_key, s);
+
+        if options.debug_query {
+            eprintln!("debug: saved search-item result to cache");
+        }
+    }
+
+    Ok(rows)
 }
 
 fn search_items_by_instance_of_query(
@@ -334,6 +392,27 @@ fn normalize_candidate_limit(candidate_limit: Option<usize>, output_limit: usize
         .unwrap_or(DEFAULT_CANDIDATE_LIMIT)
         .max(output_limit)
         .clamp(1, MAX_SEARCH_LIMIT)
+}
+
+fn search_items_by_instance_of_cache_key(
+    type_qid: &str,
+    query: &str,
+    output_limit: usize,
+    candidate_limit: usize,
+    include_subclasses: bool,
+) -> anyhow::Result<String> {
+    let key_data = serde_json::json!({
+        "typeQid": type_qid,
+        "query": query,
+        "outputLimit": output_limit,
+        "candidateLimit": candidate_limit,
+        "includeSubclasses": include_subclasses,
+    });
+
+    Ok(format!(
+        "search_items_by_instance_of:v1:{}",
+        serde_json::to_string(&key_data)?
+    ))
 }
 
 fn sparql_string_escape(value: &str) -> String {

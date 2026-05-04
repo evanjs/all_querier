@@ -85,6 +85,14 @@ enum Command {
         #[arg(long)]
         debug_query: bool,
 
+        /// Only read from the local Wikidata cache; do not call the Wikidata API
+        #[arg(long, conflicts_with = "force_fetch")]
+        cache_only: bool,
+
+        /// Ignore cached search results and fetch from Wikidata
+        #[arg(long, conflicts_with = "cache_only")]
+        force_fetch: bool,
+
         /// Only match direct P31 values; do not include subclasses via P279
         #[arg(long)]
         direct_only: bool,
@@ -187,6 +195,8 @@ async fn try_main() -> anyhow::Result<()> {
             limit,
             candidate_limit,
             debug_query,
+            cache_only,
+            force_fetch,
             direct_only,
             json,
             pretty,
@@ -214,6 +224,8 @@ async fn try_main() -> anyhow::Result<()> {
                     candidate_limit,
                     include_subclasses: !direct_only,
                     debug_query,
+                    cache_only,
+                    force_fetch,
                 },
             )
                 .await?;
