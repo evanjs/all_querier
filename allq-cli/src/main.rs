@@ -4,6 +4,7 @@ use clap::{
     Parser,
     Subcommand,
 };
+use serde_json::Value;
 
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
@@ -230,10 +231,34 @@ async fn try_main() -> anyhow::Result<()> {
             )
                 .await?;
 
+            let lookup_mode = if cache_only {
+                allq_wikidata::WikidataEntityLookupMode::CacheOnly
+            } else if force_fetch {
+                allq_wikidata::WikidataEntityLookupMode::ForceFetch
+            } else {
+                allq_wikidata::WikidataEntityLookupMode::NetworkFallback
+            };
+
+            if debug_query {
+                eprintln!(
+                    "debug: hydrating {} search-item result(s) via entity-by-qid",
+                    rows.len()
+                );
+                eprintln!("debug: entity lookup mode={lookup_mode:?}");
+            }
+
+            let client = if cache_only {
+                allq_wikidata::WikidataClient::new_local_only().await?
+            } else {
+                allq_wikidata::WikidataClient::new().await?
+            };
+
+            let entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+
             if json {
-                println!("{}", serde_json::to_string(&rows)?);
+                println!("{}", serde_json::to_string(&entities)?);
             } else if pretty {
-                println!("{}", serde_json::to_string_pretty(&rows)?);
+                println!("{}", serde_json::to_string_pretty(&entities)?);
             } else {
                 println!("id\tlabel\tdescription");
 
@@ -250,6 +275,27 @@ async fn try_main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn hydrate_search_item_entities(
+    client: &allq_wikidata::WikidataClient,
+    rows: &[allq_wikidata::WikidataItemSearchResult],
+    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
+) -> anyhow::Result<Vec<Value>> {
+    let mut entities = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let response = client.entity_by_qid_with_mode(&row.id, lookup_mode).await?;
+        let entity = response
+            .get("entities")
+            .and_then(|entities| entities.get(&row.id))
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {}", row.id))?;
+
+        entities.push(entity);
+    }
+
+    Ok(entities)
 }
 
 fn clean_tsv_field(value: &str) -> String {
