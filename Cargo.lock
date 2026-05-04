@@ -31,6 +31,7 @@ name = "allq-cli"
 version = "0.1.0"
 dependencies = [
  "allq-wikidata",
+ "anyhow",
  "clap",
  "serde_json",
  "tokio",

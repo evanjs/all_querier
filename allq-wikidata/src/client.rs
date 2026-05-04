@@ -27,6 +27,7 @@ pub struct WikidataClient {
 pub enum WikidataEntityLookupMode {
     NetworkFallback,
     CacheOnly,
+    ForceFetch,
 }
 
 impl WikidataClient {
@@ -85,11 +86,13 @@ impl WikidataClient {
         let qid = normalize_qid(qid)?;
         let cache_key = wikidata_entity_cache_key(qid);
 
-        if let Some(cache) = &self.cache {
-            if let Some(entry) = cache.get(&cache_key).await? {
-                let s = entry.value().clone();
-                let parsed = serde_json::from_str::<Value>(&s)?;
-                return Ok(parsed);
+        if lookup_mode != WikidataEntityLookupMode::ForceFetch {
+            if let Some(cache) = &self.cache {
+                if let Some(entry) = cache.get(&cache_key).await? {
+                    let s = entry.value().clone();
+                    let parsed = serde_json::from_str::<Value>(&s)?;
+                    return Ok(parsed);
+                }
             }
         }
 

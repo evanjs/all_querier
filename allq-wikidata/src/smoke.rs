@@ -4,6 +4,7 @@ use crate::{
     WikidataClient,
     WikidataEntityLookupMode,
 };
+
 pub async fn smoke_test() -> anyhow::Result<()> {
     let client = WikidataClient::new().await?;
     let res = client.userinfo().await?;
@@ -14,6 +15,19 @@ pub async fn smoke_test() -> anyhow::Result<()> {
 }
 
 pub async fn retrieve_entity_by_qid(qid: &str, cache_only: bool) -> anyhow::Result<()> {
+    retrieve_entity_by_qid_with_options(qid, cache_only, false).await
+}
+
+pub async fn retrieve_entity_by_qid_with_options(
+    qid: &str,
+    cache_only: bool,
+    force_fetch: bool,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !(cache_only && force_fetch),
+        "--cache-only and --force-fetch cannot be used together"
+    );
+
     let client = if cache_only {
         WikidataClient::new_local_only().await?
     } else {
@@ -22,6 +36,8 @@ pub async fn retrieve_entity_by_qid(qid: &str, cache_only: bool) -> anyhow::Resu
 
     let lookup_mode = if cache_only {
         WikidataEntityLookupMode::CacheOnly
+    } else if force_fetch {
+        WikidataEntityLookupMode::ForceFetch
     } else {
         WikidataEntityLookupMode::NetworkFallback
     };
