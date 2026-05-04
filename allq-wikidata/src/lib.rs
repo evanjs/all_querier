@@ -15,6 +15,7 @@ pub use smoke::{
 };
 pub use listproperties::{
     fetch_listproperties_rows_json,
+    list_properties_id_name_description_json,
 };
 pub use properties::{
     DatatypeKey, Properties, Property,

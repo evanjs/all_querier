@@ -32,6 +32,21 @@ enum Command {
         #[arg(short, long)]
         out: PathBuf,
     },
+
+    /// List Wikidata properties
+    ListProperties {
+        /// Output compact JSON for shell consumers such as nushell
+        #[arg(long)]
+        json: bool,
+
+        /// Pretty-print JSON
+        #[arg(long, conflicts_with = "json")]
+        pretty: bool,
+
+        /// Fetch current data from Wikidata instead of using the built-in snapshot
+        #[arg(long)]
+        refresh: bool,
+    },
 }
 
 #[tokio::main]
@@ -61,7 +76,37 @@ async fn try_main() -> Result<(), Box<dyn Error>> {
             let json = serde_json::to_string_pretty(&rows)?;
             tokio::fs::write(out, json).await?;
         }
+        Command::ListProperties {
+            json,
+            pretty,
+            refresh,
+        } => {
+            let rows = allq_wikidata::list_properties_id_name_description_json(refresh).await?;
+
+            if json {
+                println!("{}", serde_json::to_string(&rows)?);
+            } else if pretty {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else {
+                println!("id\tname\tdescription");
+
+                for row in rows {
+                    println!(
+                        "{}\t{}\t{}",
+                        clean_tsv_field(&row.id),
+                        clean_tsv_field(&row.name),
+                        clean_tsv_field(row.description.as_deref().unwrap_or(""))
+                    );
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn clean_tsv_field(value: &str) -> String {
+    value
+        .replace('\t', " ")
+        .replace(['\r', '\n'], " ")
 }

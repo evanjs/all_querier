@@ -2,10 +2,12 @@ use anyhow::Context;
 use serde_json::Value;
 
 use crate::{
-    Property,
     DatatypeKey,
+    Property,
     WikidataClient,
 };
+
+const BUILTIN_PROPERTIES_JSON: &str = include_str!("../../data/properties.json");
 
 const LIST_PROPERTIES_QUERY: &str = r#"
 SELECT ?property ?propertyLabel ?propertyDescription ?propertyType
@@ -21,6 +23,43 @@ pub async fn fetch_listproperties_rows_json() -> anyhow::Result<Vec<Property>> {
     let res = client.sparql_query_json(LIST_PROPERTIES_QUERY).await?;
 
     parse_listproperties_rows(&res)
+}
+
+pub async fn list_properties_id_name_description_json(
+    refresh: bool,
+) -> anyhow::Result<Vec<IdNameDescription>> {
+    let rows = if refresh {
+        fetch_listproperties_rows_json().await?
+    } else {
+        builtin_listproperties_rows_json()?
+    };
+
+    Ok(properties_to_id_name_description(rows))
+}
+
+fn builtin_listproperties_rows_json() -> anyhow::Result<Vec<Property>> {
+    Ok(serde_json::from_str(BUILTIN_PROPERTIES_JSON)?)
+}
+
+fn properties_to_id_name_description(properties: Vec<Property>) -> Vec<IdNameDescription> {
+    properties
+        .into_iter()
+        .map(|property| IdNameDescription {
+            id: property.id,
+            name: property.label,
+            description: property.description,
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdNameDescription {
+    pub id: String,
+    pub name: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 fn parse_listproperties_rows(value: &Value) -> anyhow::Result<Vec<Property>> {
