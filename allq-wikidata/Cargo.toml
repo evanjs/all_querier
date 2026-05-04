@@ -8,3 +8,4 @@ mediawiki = "0.5.1"
 tokio = { workspace = true }
 anyhow = "1.0.102"
 serde_json = "1.0.149"
+foyer = { version = "0.22.3", features = ["serde"] }

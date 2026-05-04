@@ -12,7 +12,7 @@ struct Cli {
 async fn main() {
     let cli = Cli::parse();
 
-    if let Err(error) = allq_wikidata::smoke_test_entity_by_qid(&cli.qid).await {
+    if let Err(error) = allq_wikidata::retrieve_entity_by_qid(&cli.qid).await {
         eprintln!("error: {error:#}");
 
         let mut source = error.source();

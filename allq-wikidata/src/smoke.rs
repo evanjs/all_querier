@@ -11,7 +11,7 @@ pub async fn smoke_test() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn smoke_test_entity_by_qid(qid: &str) -> anyhow::Result<()> {
+pub async fn retrieve_entity_by_qid(qid: &str) -> anyhow::Result<()> {
     let client = WikidataClient::new().await?;
     let res = client.entity_by_qid(qid).await?;
 

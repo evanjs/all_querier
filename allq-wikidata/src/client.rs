@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use mediawiki::prelude::*;
 use serde_json::Value;
 
+use crate::cache::{
+    WikidataCache, create_wikidata_cache,
+};
+
 pub const WIKIDATA_API_URL: &str = "https://www.wikidata.org/w/api.php";
 
 pub const ENTITY_QUERY_PROPS: &str = "info|labels|descriptions|aliases|claims|sitelinks";
@@ -15,17 +19,25 @@ const DEFAULT_MAXLAG: &str = "5";
 
 pub struct WikidataClient {
     api: Api,
+    cache: Option<WikidataCache>,
 }
 
 impl WikidataClient {
     pub async fn new() -> anyhow::Result<Self> {
         let api = wikidata_api().await?;
+        let cache = create_wikidata_cache().await?;
 
-        Ok(Self { api })
+        Ok(Self {
+            api,
+            cache: Some(cache),
+        })
     }
 
     pub fn from_api(api: Api) -> Self {
-        Self { api }
+        Self {
+            api,
+            cache: None,
+        }
     }
 
     pub fn api(&self) -> &Api {
@@ -44,6 +56,13 @@ impl WikidataClient {
 
     pub async fn entity_by_qid(&self, qid: &str) -> anyhow::Result<Value> {
         let qid = normalize_qid(qid)?;
+        let cache_key = wikidata_entity_cache_key(qid);
+
+        if let Some(cache) = &self.cache {
+            if let Some(entry) = cache.get(&cache_key).await? {
+                return Ok(entry.value().clone());
+            }
+        }
 
         let params = query_params(&[
             ("action", "wbgetentities"),
@@ -55,7 +74,15 @@ impl WikidataClient {
             ("maxlag", DEFAULT_MAXLAG),
         ]);
 
-        self.query_api_json(&params).await
+        let res = self.query_api_json(&params).await?;
+
+        if should_cache_wikidata_response(&res) {
+            if let Some(cache) = &self.cache {
+                cache.insert(cache_key, res.clone());
+            }
+        }
+
+        Ok(res)
     }
 
     pub async fn query_api_json(&self, params: &HashMap<String, String>) -> anyhow::Result<Value> {
@@ -86,6 +113,14 @@ fn normalize_qid(qid: &str) -> anyhow::Result<&str> {
     anyhow::ensure!(!qid.is_empty(), "Wikidata QID cannot be empty");
 
     Ok(qid)
+}
+
+fn wikidata_entity_cache_key(qid: &str) -> String {
+    format!("entity_by_qid:{qid}")
+}
+
+fn should_cache_wikidata_response(value: &Value) -> bool {
+    value.get("error").is_none()
 }
 
 fn wikimedia_access_token() -> Option<String> {
