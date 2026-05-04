@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Context;
 use mediawiki::prelude::*;
 use serde_json::Value;
 
@@ -18,8 +19,14 @@ const DEFAULT_FORMAT_VERSION: &str = "2";
 const DEFAULT_MAXLAG: &str = "5";
 
 pub struct WikidataClient {
-    api: Api,
+    api: Option<Api>,
     cache: Option<WikidataCache>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikidataEntityLookupMode {
+    NetworkFallback,
+    CacheOnly,
 }
 
 impl WikidataClient {
@@ -28,20 +35,31 @@ impl WikidataClient {
         let cache = create_wikidata_cache().await?;
 
         Ok(Self {
-            api,
+            api: Some(api),
+            cache: Some(cache),
+        })
+    }
+
+    pub async fn new_local_only() -> anyhow::Result<Self> {
+        let cache = create_wikidata_cache().await?;
+
+        Ok(Self {
+            api: None,
             cache: Some(cache),
         })
     }
 
     pub fn from_api(api: Api) -> Self {
         Self {
-            api,
+            api: Some(api),
             cache: None,
         }
     }
 
-    pub fn api(&self) -> &Api {
-        &self.api
+    pub fn api(&self) -> anyhow::Result<&Api> {
+        self.api
+            .as_ref()
+            .context("Wikidata API is unavailable in local-only cache lookup mode")
     }
 
     pub async fn userinfo(&self) -> anyhow::Result<Value> {
@@ -55,13 +73,28 @@ impl WikidataClient {
     }
 
     pub async fn entity_by_qid(&self, qid: &str) -> anyhow::Result<Value> {
+        self.entity_by_qid_with_mode(qid, WikidataEntityLookupMode::NetworkFallback)
+            .await
+    }
+
+    pub async fn entity_by_qid_with_mode(
+        &self,
+        qid: &str,
+        lookup_mode: WikidataEntityLookupMode,
+    ) -> anyhow::Result<Value> {
         let qid = normalize_qid(qid)?;
         let cache_key = wikidata_entity_cache_key(qid);
 
         if let Some(cache) = &self.cache {
             if let Some(entry) = cache.get(&cache_key).await? {
-                return Ok(entry.value().clone());
+                let s = entry.value().clone();
+                let parsed = serde_json::from_str::<Value>(&s)?;
+                return Ok(parsed);
             }
+        }
+
+        if lookup_mode == WikidataEntityLookupMode::CacheOnly {
+            anyhow::bail!("Wikidata entity {qid} was not found in the local cache");
         }
 
         let params = query_params(&[
@@ -78,7 +111,8 @@ impl WikidataClient {
 
         if should_cache_wikidata_response(&res) {
             if let Some(cache) = &self.cache {
-                cache.insert(cache_key, res.clone());
+                let s = serde_json::to_string(&res)?;
+                cache.insert(cache_key, s);
             }
         }
 
@@ -86,7 +120,12 @@ impl WikidataClient {
     }
 
     pub async fn query_api_json(&self, params: &HashMap<String, String>) -> anyhow::Result<Value> {
-        Ok(self.api.get_query_api_json(params).await?)
+        let api = self
+            .api
+            .as_ref()
+            .context("Wikidata API is unavailable in local-only cache lookup mode")?;
+
+        Ok(api.get_query_api_json(params).await?)
     }
 }
 

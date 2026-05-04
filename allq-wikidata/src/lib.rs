@@ -6,7 +6,7 @@ pub use cache::{
     WikidataCache, create_wikidata_cache,
 };
 pub use client::{
-    ENTITY_QUERY_PROPS, WIKIDATA_API_URL, WikidataClient, wikidata_api,
+    ENTITY_QUERY_PROPS, WIKIDATA_API_URL, WikidataClient, WikidataEntityLookupMode, wikidata_api,
 };
 pub use smoke::{
     smoke_test, retrieve_entity_by_qid,

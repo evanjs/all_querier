@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
 use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, RecoverMode};
-use serde_json::Value;
 
-pub type WikidataCache = HybridCache<String, Value>;
+pub type WikidataCache = HybridCache<String, String>;
 
 const WIKIDATA_CACHE_SCHEMA_VERSION: &str = "v1";
 const WIKIDATA_MEMORY_CACHE_CAPACITY: usize = 64 * 1024 * 1024;
