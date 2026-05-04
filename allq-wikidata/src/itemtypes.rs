@@ -65,6 +65,12 @@ pub const CURATED_WIKIDATA_ITEM_TYPES: &[WikidataItemType] = &[
         label: "song",
         description: "musical composition with vocals",
     },
+    WikidataItemType {
+        key: "character",
+        qid: "Q95074",
+        label: "character",
+        description: "fictional human or non-human character in a narrative work of art"
+    }
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +127,17 @@ pub fn wikidata_item_type_by_key(key: &str) -> Option<&'static WikidataItemType>
         .find(|item_type| item_type.key.eq_ignore_ascii_case(key))
 }
 
+pub fn wikidata_item_type_by_key_or_label(value: &str) -> Option<&'static WikidataItemType> {
+    let value = value.trim();
+
+    CURATED_WIKIDATA_ITEM_TYPES
+        .iter()
+        .find(|item_type| {
+            item_type.key.eq_ignore_ascii_case(value)
+                || item_type.label.eq_ignore_ascii_case(value)
+        })
+}
+
 pub fn resolve_wikidata_item_type_qid(value: &str) -> anyhow::Result<String> {
     let value = value.trim();
 
@@ -130,13 +147,19 @@ pub fn resolve_wikidata_item_type_qid(value: &str) -> anyhow::Result<String> {
         return normalize_item_qid(value);
     }
 
-    if let Some(item_type) = wikidata_item_type_by_key(value) {
+    if let Some(item_type) = wikidata_item_type_by_key_or_label(value) {
         return Ok(item_type.qid.to_string());
     }
 
     let known_types = CURATED_WIKIDATA_ITEM_TYPES
         .iter()
-        .map(|item_type| item_type.key)
+        .map(|item_type| {
+            if item_type.key.eq_ignore_ascii_case(item_type.label) {
+                item_type.key.to_string()
+            } else {
+                format!("{} ({})", item_type.key, item_type.label)
+            }
+        })
         .collect::<Vec<_>>()
         .join(", ");
 

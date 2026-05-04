@@ -68,7 +68,7 @@ enum Command {
 
     /// Search Wikidata items by query/title and instance-of type
     SearchItem {
-        /// Curated type key, e.g. anime-tv-series, film, video-game
+        /// Curated type key or label, e.g. anime-tv-series, film, video game, character
         #[arg(short = 't', long = "type", conflicts_with = "type_qid")]
         item_type: Option<String>,
 
