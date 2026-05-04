@@ -127,6 +127,10 @@ impl WikidataClient {
 
         Ok(api.get_query_api_json(params).await?)
     }
+
+    pub async fn sparql_query_json(&self, query: &str) -> anyhow::Result<Value> {
+        Ok(self.api()?.sparql_query(query).await?)
+    }
 }
 
 pub async fn wikidata_api() -> anyhow::Result<Api> {
