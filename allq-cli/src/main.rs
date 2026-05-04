@@ -1,6 +1,18 @@
+use clap::Parser;
+
+#[derive(Debug, Parser)]
+#[command(name = "allq")]
+#[command(about = "Query all the things")]
+struct Cli {
+    #[arg(short, long)]
+    qid: String,
+}
+
 #[tokio::main]
 async fn main() {
-    if let Err(error) = allq_wikidata::smoke_test_entity_by_qid("Q105337231").await {
+    let cli = Cli::parse();
+
+    if let Err(error) = allq_wikidata::smoke_test_entity_by_qid(&cli.qid).await {
         eprintln!("error: {error:#}");
 
         let mut source = error.source();
