@@ -1,10 +1,16 @@
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+};
 
 use clap::{
     Parser,
     Subcommand,
 };
-use serde_json::Value;
+use serde_json::{
+    Map,
+    Value,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
@@ -97,6 +103,10 @@ enum Command {
         /// Only match direct P31 values; do not include subclasses via P279
         #[arg(long)]
         direct_only: bool,
+
+        /// Add Wikidata property-name annotations to hydrated JSON entity output
+        #[arg(long)]
+        annotate_properties: bool,
 
         /// Output compact JSON for shell consumers such as nushell
         #[arg(long)]
@@ -199,6 +209,7 @@ async fn try_main() -> anyhow::Result<()> {
             cache_only,
             force_fetch,
             direct_only,
+            annotate_properties,
             json,
             pretty,
         } => {
@@ -253,7 +264,12 @@ async fn try_main() -> anyhow::Result<()> {
                 allq_wikidata::WikidataClient::new().await?
             };
 
-            let entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+            let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+
+            if annotate_properties {
+                let property_names = wikidata_property_names_by_id().await?;
+                annotate_entities_with_property_names(&mut entities, &property_names);
+            }
 
             if json {
                 println!("{}", serde_json::to_string(&entities)?);
@@ -296,6 +312,88 @@ async fn hydrate_search_item_entities(
     }
 
     Ok(entities)
+}
+
+async fn wikidata_property_names_by_id() -> anyhow::Result<HashMap<String, String>> {
+    let properties = allq_wikidata::list_properties_id_name_description_json(false).await?;
+
+    Ok(properties
+        .into_iter()
+        .map(|property| (property.id, property.name))
+        .collect())
+}
+
+fn annotate_entities_with_property_names(
+    entities: &mut [Value],
+    property_names: &HashMap<String, String>,
+) {
+    for entity in entities {
+        add_entity_claim_property_names(entity, property_names);
+        annotate_value_property_names(entity, property_names);
+    }
+}
+
+fn add_entity_claim_property_names(
+    entity: &mut Value,
+    property_names: &HashMap<String, String>,
+) {
+    let Some(claims) = entity
+        .get("claims")
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+
+    let names = claims
+        .keys()
+        .filter_map(|property_id| {
+            property_names
+                .get(property_id)
+                .map(|name| (property_id.clone(), Value::String(name.clone())))
+        })
+        .collect::<Map<String, Value>>();
+
+    if names.is_empty() {
+        return;
+    }
+
+    if let Some(entity) = entity.as_object_mut() {
+        entity.insert("propertyNames".to_string(), Value::Object(names));
+    }
+}
+
+fn annotate_value_property_names(
+    value: &mut Value,
+    property_names: &HashMap<String, String>,
+) {
+    match value {
+        Value::Object(object) => {
+            if let Some(property_id) = object
+                .get("property")
+                .and_then(Value::as_str)
+            {
+                if let Some(property_name) = property_names.get(property_id) {
+                    object.insert(
+                        "propertyName".to_string(),
+                        Value::String(property_name.clone()),
+                    );
+                }
+            }
+
+            for value in object.values_mut() {
+                annotate_value_property_names(value, property_names);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                annotate_value_property_names(value, property_names);
+            }
+        }
+        Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_) => {}
+    }
 }
 
 fn clean_tsv_field(value: &str) -> String {
