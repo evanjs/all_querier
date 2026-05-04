@@ -4,6 +4,7 @@ mod smoke;
 mod listproperties;
 mod properties;
 mod itemtypes;
+mod externallinks;
 
 pub use cache::{
     WikidataCache, create_wikidata_cache,
@@ -27,4 +28,10 @@ pub use itemtypes::{
     WikidataItemType, curated_wikidata_item_types, resolve_wikidata_item_type_qid,
     search_items_by_curated_type, search_items_by_instance_of,
     search_items_by_instance_of_with_options, wikidata_item_type_by_key,
+    wikidata_item_type_by_key_or_label,
+};
+pub use externallinks::{
+    add_external_links_to_entities,
+    add_external_links_to_entity,
+    add_external_links_to_wbgetentities_response,
 };

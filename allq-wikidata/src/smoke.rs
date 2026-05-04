@@ -3,7 +3,9 @@ use serde_json::Value;
 use crate::{
     WikidataClient,
     WikidataEntityLookupMode,
+    add_external_links_to_wbgetentities_response,
 };
+
 
 pub async fn smoke_test() -> anyhow::Result<()> {
     let client = WikidataClient::new().await?;
@@ -42,7 +44,8 @@ pub async fn retrieve_entity_by_qid_with_options(
         WikidataEntityLookupMode::NetworkFallback
     };
 
-    let res = client.entity_by_qid_with_mode(qid, lookup_mode).await?;
+    let mut res = client.entity_by_qid_with_mode(qid, lookup_mode).await?;
+    add_external_links_to_wbgetentities_response(&mut res, &client, lookup_mode).await?;
 
     print_pretty_json(&res)?;
 

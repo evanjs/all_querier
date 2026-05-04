@@ -12,6 +12,7 @@ use serde_json::{
     Value,
 };
 
+
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
 #[command(about = "Query all the things")]
@@ -265,6 +266,12 @@ async fn try_main() -> anyhow::Result<()> {
             };
 
             let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+            allq_wikidata::add_external_links_to_entities(
+                &mut entities,
+                &client,
+                lookup_mode,
+            )
+                .await?;
 
             if annotate_properties {
                 let property_names = wikidata_property_names_by_id().await?;
