@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
-    "allq-cli", "allq-providers",
+    "allq-cli",
+    "allq-providers",
     "allq-wikidata"
 ]
 

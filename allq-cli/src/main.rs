@@ -3,6 +3,7 @@ use std::{
     path::PathBuf,
 };
 
+use anyhow::Context;
 use clap::{
     Parser,
     Subcommand,
@@ -11,6 +12,14 @@ use serde_json::{
     Map,
     Value,
 };
+
+use allq_providers::{
+    ExternalIdPageProvider,
+    MyWaifuListProvider,
+    ProviderPageData,
+};
+use tracing::debug;
+use tracing_subscriber::EnvFilter;
 
 
 #[derive(Debug, Parser)]
@@ -81,6 +90,10 @@ enum Command {
         #[arg(short, long)]
         query: String,
 
+        /// Follow a supported external link from the resolved Wikidata item, e.g. waifu
+        #[arg(short = 'l', long = "link")]
+        link: Option<String>,
+
         /// Maximum number of output results, clamped to 1..=50
         #[arg(short, long, default_value_t = 1)]
         limit: usize,
@@ -132,6 +145,15 @@ enum Command {
     },
 }
 
+impl Cli {
+    fn debug_logging_enabled(&self) -> bool {
+        match &self.command {
+            Command::SearchItem { debug_query, .. } => *debug_query,
+            _ => false,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     if let Err(error) = try_main().await {
@@ -149,6 +171,8 @@ async fn main() {
 
 async fn try_main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    init_logging(cli.debug_logging_enabled())?;
 
     match cli.command {
         Command::EntityByQid {
@@ -217,6 +241,7 @@ async fn try_main() -> anyhow::Result<()> {
             item_type,
             type_qid,
             query,
+            link,
             limit,
             candidate_limit,
             debug_query,
@@ -279,6 +304,25 @@ async fn try_main() -> anyhow::Result<()> {
             };
 
             let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+
+            if let Some(link) = link {
+                let followed = follow_search_item_link(
+                    &client,
+                    &entities,
+                    lookup_mode,
+                    &link,
+                )
+                    .await?;
+
+                if json {
+                    println!("{}", serde_json::to_string(&followed)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&followed)?);
+                }
+
+                return Ok(());
+            }
+
             allq_wikidata::add_external_links_to_entities(
                 &mut entities,
                 &client,
@@ -342,6 +386,177 @@ async fn hydrate_search_item_entities(
     Ok(entities)
 }
 
+async fn follow_search_item_link(
+    client: &allq_wikidata::WikidataClient,
+    entities: &[Value],
+    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
+    link: &str,
+) -> anyhow::Result<Value> {
+    let route = ExternalLinkRoute::resolve(link)?;
+
+    debug!(
+            link,
+            source = route.source,
+            property_id = route.property_id,
+            "resolved external link route",
+        );
+
+    let entity = entities
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("search-item produced no entities to follow"))?;
+
+    let external_ids = allq_wikidata::external_ids_for_entity(
+        entity,
+        client,
+        lookup_mode,
+    )
+        .await?;
+
+    let external_id = external_ids
+        .iter()
+        .find(|external_id| {
+            external_id.property_id == route.property_id
+                && external_id.source.as_deref() == Some(route.source)
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                    "resolved Wikidata item has no supported {link} external ID; expected {} / {}",
+                    route.property_id,
+                    route.source,
+                )
+        })?;
+
+    debug!(
+            wikidata_qid = external_id.wikidata_qid.as_deref().unwrap_or(""),
+            property_id = external_id.property_id,
+            source = external_id.source.as_deref().unwrap_or(""),
+            value = external_id.value,
+            "resolved provider external ID",
+        );
+
+    if route.source == "mywaifulist" {
+        let provider = MyWaifuListProvider;
+        let page_data = fetch_provider_page_data_with_cache(
+            client,
+            &provider,
+            &external_id.value,
+            lookup_mode,
+        )
+            .await?;
+
+        return provider.parse_page_data(&page_data);
+    }
+
+    anyhow::bail!("unsupported external link provider: {}", route.source)
+}
+
+async fn fetch_provider_page_data_with_cache<P>(
+    client: &allq_wikidata::WikidataClient,
+    provider: &P,
+    value: &str,
+    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
+) -> anyhow::Result<ProviderPageData>
+where
+    P: ExternalIdPageProvider + Sync,
+{
+    let cache_key = provider_page_cache_key(provider.source(), value);
+
+    if lookup_mode != allq_wikidata::WikidataEntityLookupMode::ForceFetch {
+        if let Some(cache) = client.cache_as_ref() {
+            if let Some(entry) = cache.get(&cache_key).await? {
+                debug!(
+                        cache_key = %cache_key,
+                        source = provider.source(),
+                        value,
+                        "provider page cache hit",
+                    );
+
+                return Ok(ProviderPageData {
+                    source: provider.source(),
+                    url: provider.page_url(value),
+                    body: entry.value().clone(),
+                });
+            }
+        }
+    }
+
+    if lookup_mode == allq_wikidata::WikidataEntityLookupMode::CacheOnly {
+        anyhow::bail!(
+                "provider page {}:{value} was not found in the local cache",
+                provider.source(),
+            );
+    }
+
+    debug!(
+            cache_key = %cache_key,
+            source = provider.source(),
+            value,
+            "provider page cache miss; fetching",
+        );
+
+    let page_data = provider.fetch_page_data(value).await?;
+
+    if let Some(cache) = client.cache_as_ref() {
+        cache.insert(cache_key.clone(), page_data.body.clone());
+
+        debug!(
+                cache_key = %cache_key,
+                source = provider.source(),
+                value,
+                bytes = page_data.body.len(),
+                "stored provider page in cache",
+            );
+    }
+
+    Ok(page_data)
+}
+
+fn provider_page_cache_key(source: &str, value: &str) -> String {
+    format!("external_page:{source}:{value}")
+}
+
+struct ExternalLinkRoute {
+    source: &'static str,
+    property_id: &'static str,
+}
+
+impl ExternalLinkRoute {
+    fn resolve(link: &str) -> anyhow::Result<Self> {
+        match normalize_link_key(link).as_str() {
+            "waifu" | "mywaifulist" | "my-waifu-list" => Ok(Self {
+                source: "mywaifulist",
+                property_id: "P13031",
+            }),
+            _ => anyhow::bail!(
+                    "unsupported link type {link:?}; supported link types: waifu, mywaifulist"
+                ),
+        }
+    }
+}
+
+fn normalize_link_key(link: &str) -> String {
+    link.trim().to_ascii_lowercase()
+}
+
+fn init_logging(debug_logging: bool) -> anyhow::Result<()> {
+    let env_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        EnvFilter::try_new(rust_log)
+            .context("invalid RUST_LOG env filter")?
+    } else if debug_logging {
+        EnvFilter::try_new("warn,allq_cli=debug,allq_providers=debug,allq_wikidata=debug")
+            .context("invalid built-in debug env filter")?
+    } else {
+        EnvFilter::try_new("warn")
+            .context("invalid built-in default env filter")?
+    };
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    Ok(())
+}
 async fn wikidata_property_names_by_id() -> anyhow::Result<HashMap<String, String>> {
     let properties = allq_wikidata::list_properties_id_name_description_json(false).await?;
 

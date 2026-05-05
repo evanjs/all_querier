@@ -1,6 +1,14 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::debug;
+
+static APP_USER_AGENT: &str = concat!(
+env!("CARGO_PKG_NAME"),
+"/",
+env!("CARGO_PKG_VERSION"),
+);
+
 
 pub struct ProviderPageData {
     pub source: &'static str,
@@ -24,8 +32,23 @@ impl ExternalIdPageProvider for MyWaifuListProvider {
     fn page_url(&self, value: &str) -> String { format!("https://mywaifulist.moe/waifu/{value}") }
     async fn fetch_page_data(&self, value: &str) -> anyhow::Result<ProviderPageData> {
         let url = self.page_url(value);
+
+        debug!(
+            source = self.source(),
+            %url,
+            "fetching provider page",
+        );
+
         let body = reqwest::Client::builder().user_agent("allq/0.1.0").build()?
             .get(&url).send().await?.text().await?;
+
+        debug!(
+            source = self.source(),
+            %url,
+            bytes = body.len(),
+            "fetched provider page",
+        );
+
         Ok(ProviderPageData { source: self.source(), url, body })
     }
     fn parse_page_data(&self, page_data: &ProviderPageData) -> anyhow::Result<Value> {
