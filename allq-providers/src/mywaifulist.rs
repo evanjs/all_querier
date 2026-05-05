@@ -2,15 +2,27 @@ use async_trait::async_trait;
 use tracing::debug;
 use serde_json::Value;
 use anyhow::Context;
-use crate::{ExternalIdPageProvider, ProviderPageData};
+use crate::{
+    ExternalIdPageProvider,
+    ProviderHttpClient,
+    ProviderPageData,
+};
 
 pub struct MyWaifuListProvider;
 
 #[async_trait]
 impl ExternalIdPageProvider for MyWaifuListProvider {
     fn source(&self) -> &'static str { "mywaifulist" }
-    fn page_url(&self, value: &str) -> String { format!("https://mywaifulist.moe/waifu/{value}") }
-    async fn fetch_page_data(&self, value: &str) -> anyhow::Result<ProviderPageData> {
+
+    fn page_url(&self, value: &str) -> String {
+        format!("https://mywaifulist.moe/waifu/{value}")
+    }
+
+    async fn fetch_page_data(
+        &self,
+        http_client: &ProviderHttpClient,
+        value: &str,
+    ) -> anyhow::Result<ProviderPageData> {
         let url = self.page_url(value);
 
         debug!(
@@ -19,8 +31,7 @@ impl ExternalIdPageProvider for MyWaifuListProvider {
             "fetching provider page",
         );
 
-        let body = reqwest::Client::builder().user_agent("allq/0.1.0").build()?
-            .get(&url).send().await?.text().await?;
+        let body = http_client.get_text(&url).await?;
 
         debug!(
             source = self.source(),

@@ -15,6 +15,7 @@ use serde_json::{
 
 use allq_providers::{
     ExternalIdPageProvider,
+    ProviderHttpClient,
     ProviderPageData,
 };
 use tracing::debug;
@@ -305,8 +306,10 @@ async fn try_main() -> anyhow::Result<()> {
             let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
 
             if let Some(link) = link {
+                let provider_http_client = ProviderHttpClient::new()?;
                 let followed = follow_search_item_link(
                     &client,
+                    &provider_http_client,
                     &entities,
                     lookup_mode,
                     &link,
@@ -387,6 +390,7 @@ async fn hydrate_search_item_entities(
 
 async fn follow_search_item_link(
     client: &allq_wikidata::WikidataClient,
+    provider_http_client: &ProviderHttpClient,
     entities: &[Value],
     lookup_mode: allq_wikidata::WikidataEntityLookupMode,
     link: &str,
@@ -437,6 +441,7 @@ async fn follow_search_item_link(
         let provider = MyWaifuListProvider;
         let page_data = fetch_provider_page_data_with_cache(
             client,
+            provider_http_client,
             &provider,
             &external_id.value,
             lookup_mode,
@@ -451,6 +456,7 @@ async fn follow_search_item_link(
 
 async fn fetch_provider_page_data_with_cache<P>(
     client: &allq_wikidata::WikidataClient,
+    provider_http_client: &ProviderHttpClient,
     provider: &P,
     value: &str,
     lookup_mode: allq_wikidata::WikidataEntityLookupMode,
@@ -493,7 +499,7 @@ where
             "provider page cache miss; fetching",
         );
 
-    let page_data = provider.fetch_page_data(value).await?;
+    let page_data = provider.fetch_page_data(provider_http_client, value).await?;
 
     if let Some(cache) = client.cache_as_ref() {
         cache.insert(cache_key.clone(), page_data.body.clone());
