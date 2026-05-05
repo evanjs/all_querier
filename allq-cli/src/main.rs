@@ -15,12 +15,11 @@ use serde_json::{
 
 use allq_providers::{
     ExternalIdPageProvider,
-    MyWaifuListProvider,
     ProviderPageData,
 };
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
-
+use allq_providers::mywaifulist::MyWaifuListProvider;
 
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
