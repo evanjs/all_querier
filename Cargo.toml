@@ -1,10 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
-    "allq-cli",
+    "allq-cli", "allq-providers",
     "allq-wikidata"
 ]
 
 [workspace.dependencies]
 tokio = { version = "1.52.1", features = ["rt", "rt-multi-thread", "macros"] }
 allq-wikidata = { path = "./allq-wikidata" }
+allq-providers = { path = "./allq-providers" }

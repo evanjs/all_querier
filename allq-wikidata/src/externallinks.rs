@@ -16,6 +16,67 @@ const THIRD_PARTY_FORMATTER_URL_PROPERTY: &str = "P3303";
 const URL_MATCH_PATTERN_PROPERTY: &str = "P8966";
 const ID_REGEX_PROPERTY: &str = "P1793";
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalId {
+    pub wikidata_qid: Option<String>,
+    pub property_id: String,
+    pub property_name: Option<String>,
+    pub source: Option<String>,
+    pub value: String,
+    pub urls: Vec<String>,
+    pub formatter_urls: Vec<String>,
+    pub third_party_formatter_urls: Vec<String>,
+    pub url_match_patterns: Vec<String>,
+    pub id_regexes: Vec<String>,
+    pub supported: bool,
+}
+
+pub async fn external_ids_by_qid(qid: &str, client: &WikidataClient, lookup_mode: WikidataEntityLookupMode) -> anyhow::Result<Vec<ExternalId>> {
+    let qid = qid.trim();
+    let response = client.entity_by_qid_with_mode(qid, lookup_mode).await?;
+    let entity = response.get("entities").and_then(|e| e.get(qid)).context("entity not found")?;
+    external_ids_for_entity(entity, client, lookup_mode).await
+}
+
+pub async fn external_ids_for_entity(entity: &Value, client: &WikidataClient, lookup_mode: WikidataEntityLookupMode) -> anyhow::Result<Vec<ExternalId>> {
+    let claims = collect_external_id_claims(entity);
+    let wikidata_qid = entity.get("id").and_then(Value::as_str).map(ToString::to_string);
+    let mut metadata_by_property = HashMap::new();
+    let mut external_ids = Vec::new();
+
+    for claim in claims {
+        let metadata = metadata_by_property.entry(claim.property_id.clone()).or_insert(
+            fetch_property_external_link_metadata(client, &claim.property_id, lookup_mode).await?
+        );
+
+        let mut urls = Vec::new();
+        append_formatted_urls(&mut urls, &metadata.formatter_urls, &claim.value);
+        append_formatted_urls(&mut urls, &metadata.third_party_formatter_urls, &claim.value);
+
+        let source = match claim.property_id.as_str() {
+            "P13031" => Some("mywaifulist".to_string()),
+            "P1733" => Some("steam".to_string()),
+            _ => None,
+        };
+
+        external_ids.push(ExternalId {
+            wikidata_qid: wikidata_qid.clone(),
+            property_id: claim.property_id,
+            property_name: claim.property_name.or_else(|| metadata.label.clone()),
+            supported: source.is_some(),
+            source,
+            value: claim.value,
+            urls,
+            formatter_urls: metadata.formatter_urls.clone(),
+            third_party_formatter_urls: metadata.third_party_formatter_urls.clone(),
+            url_match_patterns: metadata.url_match_patterns.clone(),
+            id_regexes: metadata.id_regexes.clone(),
+        });
+    }
+    Ok(external_ids)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExternalIdClaim {
     property_id: String,

@@ -31,7 +31,10 @@ pub use itemtypes::{
     wikidata_item_type_by_key_or_label,
 };
 pub use externallinks::{
+    ExternalId,
     add_external_links_to_entities,
     add_external_links_to_entity,
     add_external_links_to_wbgetentities_response,
+    external_ids_by_qid,
+    external_ids_for_entity,
 };

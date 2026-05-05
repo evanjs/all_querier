@@ -117,6 +117,19 @@ enum Command {
         #[arg(long, conflicts_with = "json")]
         pretty: bool,
     },
+    /// Print normalized Wikidata external IDs for one entity
+    EntityIds {
+        #[arg(short, long)]
+        qid: String,
+        #[arg(long)]
+        cache_only: bool,
+        #[arg(long, conflicts_with = "cache_only")]
+        force_fetch: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, conflicts_with = "json")]
+        pretty: bool,
+    },
 }
 
 #[tokio::main]
@@ -294,6 +307,14 @@ async fn try_main() -> anyhow::Result<()> {
                     );
                 }
             }
+        },
+        Command::EntityIds { qid, cache_only, force_fetch, json, pretty } => {
+            let mode = if cache_only { allq_wikidata::WikidataEntityLookupMode::CacheOnly } else if force_fetch { allq_wikidata::WikidataEntityLookupMode::ForceFetch } else { allq_wikidata::WikidataEntityLookupMode::NetworkFallback };
+            let client = if cache_only { allq_wikidata::WikidataClient::new_local_only().await? } else { allq_wikidata::WikidataClient::new().await? };
+            let ids = allq_wikidata::external_ids_by_qid(&qid, &client, mode).await?;
+            if json { println!("{}", serde_json::to_string(&ids)?); }
+            else if pretty { println!("{}", serde_json::to_string_pretty(&ids)?); }
+            else { print_external_ids_tsv(&ids); }
         }
     }
 
@@ -400,6 +421,23 @@ fn annotate_value_property_names(
         | Value::Bool(_)
         | Value::Number(_)
         | Value::String(_) => {}
+    }
+}
+
+fn print_external_ids_tsv(external_ids: &[allq_wikidata::ExternalId]) {
+    println!("wikidataQid\tpropertyId\tpropertyName\tvalue\tsource\tsupported\turls");
+
+    for external_id in external_ids {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            clean_tsv_field(external_id.wikidata_qid.as_deref().unwrap_or("")),
+            clean_tsv_field(&external_id.property_id),
+            clean_tsv_field(external_id.property_name.as_deref().unwrap_or("")),
+            clean_tsv_field(&external_id.value),
+            clean_tsv_field(external_id.source.as_deref().unwrap_or("")),
+            external_id.supported,
+            clean_tsv_field(&external_id.urls.join(" "))
+        );
     }
 }
 
