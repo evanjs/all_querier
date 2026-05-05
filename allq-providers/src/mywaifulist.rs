@@ -5,14 +5,37 @@ use anyhow::Context;
 use crate::{
     ExternalIdPageProvider,
     ProviderHttpClient,
+    ProviderLinkRoute,
     ProviderPageData,
 };
 
+const SOURCE: &str = "mywaifulist";
+const WIKIDATA_PROPERTY_ID: &str = "P13031";
+
+pub(crate) const LINK_ALIASES: &[&str] = &[
+    "waifu",
+    "mywaifulist",
+    "my-waifu-list",
+];
+
+pub static PROVIDER: MyWaifuListProvider = MyWaifuListProvider;
+
 pub struct MyWaifuListProvider;
+
+pub(crate) fn resolve_link_route(normalized_link: &str) -> Option<ProviderLinkRoute> {
+    match normalized_link {
+        "waifu" | "mywaifulist" | "my-waifu-list" => {
+            Some(ProviderLinkRoute::new(&PROVIDER, WIKIDATA_PROPERTY_ID))
+        }
+        _ => None,
+    }
+}
 
 #[async_trait]
 impl ExternalIdPageProvider for MyWaifuListProvider {
-    fn source(&self) -> &'static str { "mywaifulist" }
+    fn source(&self) -> &'static str {
+        SOURCE
+    }
 
     fn page_url(&self, value: &str) -> String {
         format!("https://mywaifulist.moe/waifu/{value}")
@@ -42,6 +65,7 @@ impl ExternalIdPageProvider for MyWaifuListProvider {
 
         Ok(ProviderPageData { source: self.source(), url, body })
     }
+
     fn parse_page_data(&self, page_data: &ProviderPageData) -> anyhow::Result<Value> {
         let needle = "data-page=\"app\" type=\"application/json\">";
         let start = page_data.body.find(needle).map(|i| i + needle.len()).context("missing inertia script")?;

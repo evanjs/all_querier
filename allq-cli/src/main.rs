@@ -17,10 +17,10 @@ use allq_providers::{
     ExternalIdPageProvider,
     ProviderHttpClient,
     ProviderPageData,
+    resolve_provider_link,
 };
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
-use allq_providers::mywaifulist::MyWaifuListProvider;
 
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
@@ -395,14 +395,14 @@ async fn follow_search_item_link(
     lookup_mode: allq_wikidata::WikidataEntityLookupMode,
     link: &str,
 ) -> anyhow::Result<Value> {
-    let route = ExternalLinkRoute::resolve(link)?;
+    let route = resolve_provider_link(link)?;
 
     debug!(
-            link,
-            source = route.source,
-            property_id = route.property_id,
-            "resolved external link route",
-        );
+        link,
+        source = route.source(),
+        property_id = route.property_id(),
+        "resolved external link route",
+    );
 
     let entity = entities
         .first()
@@ -418,40 +418,36 @@ async fn follow_search_item_link(
     let external_id = external_ids
         .iter()
         .find(|external_id| {
-            external_id.property_id == route.property_id
-                && external_id.source.as_deref() == Some(route.source)
+            external_id.property_id == route.property_id()
+                && external_id.source.as_deref() == Some(route.source())
         })
         .ok_or_else(|| {
             anyhow::anyhow!(
-                    "resolved Wikidata item has no supported {link} external ID; expected {} / {}",
-                    route.property_id,
-                    route.source,
-                )
+                "resolved Wikidata item has no supported {link} external ID; expected {} / {}",
+                route.property_id(),
+                route.source(),
+            )
         })?;
 
     debug!(
-            wikidata_qid = external_id.wikidata_qid.as_deref().unwrap_or(""),
-            property_id = external_id.property_id,
-            source = external_id.source.as_deref().unwrap_or(""),
-            value = external_id.value,
-            "resolved provider external ID",
-        );
+        wikidata_qid = external_id.wikidata_qid.as_deref().unwrap_or(""),
+        property_id = external_id.property_id,
+        source = external_id.source.as_deref().unwrap_or(""),
+        value = external_id.value,
+        "resolved provider external ID",
+    );
 
-    if route.source == "mywaifulist" {
-        let provider = MyWaifuListProvider;
-        let page_data = fetch_provider_page_data_with_cache(
-            client,
-            provider_http_client,
-            &provider,
-            &external_id.value,
-            lookup_mode,
-        )
-            .await?;
+    let provider = route.provider();
+    let page_data = fetch_provider_page_data_with_cache(
+        client,
+        provider_http_client,
+        provider,
+        &external_id.value,
+        lookup_mode,
+    )
+        .await?;
 
-        return provider.parse_page_data(&page_data);
-    }
-
-    anyhow::bail!("unsupported external link provider: {}", route.source)
+    provider.parse_page_data(&page_data)
 }
 
 async fn fetch_provider_page_data_with_cache<P>(
@@ -462,7 +458,7 @@ async fn fetch_provider_page_data_with_cache<P>(
     lookup_mode: allq_wikidata::WikidataEntityLookupMode,
 ) -> anyhow::Result<ProviderPageData>
 where
-    P: ExternalIdPageProvider + Sync,
+    P: ExternalIdPageProvider + Sync + ?Sized,
 {
     let cache_key = provider_page_cache_key(provider.source(), value);
 
@@ -518,25 +514,6 @@ where
 
 fn provider_page_cache_key(source: &str, value: &str) -> String {
     format!("external_page:{source}:{value}")
-}
-
-struct ExternalLinkRoute {
-    source: &'static str,
-    property_id: &'static str,
-}
-
-impl ExternalLinkRoute {
-    fn resolve(link: &str) -> anyhow::Result<Self> {
-        match normalize_link_key(link).as_str() {
-            "waifu" | "mywaifulist" | "my-waifu-list" => Ok(Self {
-                source: "mywaifulist",
-                property_id: "P13031",
-            }),
-            _ => anyhow::bail!(
-                    "unsupported link type {link:?}; supported link types: waifu, mywaifulist"
-                ),
-        }
-    }
 }
 
 fn normalize_link_key(link: &str) -> String {
