@@ -8,8 +8,14 @@ const WIKIDATA_CACHE_SCHEMA_VERSION: &str = "v1";
 const WIKIDATA_MEMORY_CACHE_CAPACITY: usize = 64 * 1024 * 1024;
 const WIKIDATA_DISK_CACHE_CAPACITY_BYTES: usize = 1024 * 1024 * 1024;
 
+fn all_querier_data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from(".cache"))
+        .join("all_querier")
+}
+
 pub async fn create_wikidata_cache() -> anyhow::Result<WikidataCache> {
-    let cache_dir = PathBuf::from(".cache")
+    let cache_dir = all_querier_data_dir()
         .join("foyer")
         .join("wikidata")
         .join(WIKIDATA_CACHE_SCHEMA_VERSION);

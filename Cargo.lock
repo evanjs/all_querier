@@ -81,6 +81,7 @@ name = "allq-wikidata"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs",
  "foyer",
  "mediawiki",
  "serde",
