@@ -7,71 +7,107 @@ use serde_json::Value;
 
 use crate::WikidataClient;
 
-const DEFAULT_SEARCH_LIMIT: usize = 20;
+const DEFAULT_SEARCH_LIMIT: usize = 1;
 const DEFAULT_CANDIDATE_LIMIT: usize = 20;
 const MAX_SEARCH_LIMIT: usize = 50;
-pub const CURATED_WIKIDATA_ITEM_TYPES: &[WikidataItemType] = &[
-    WikidataItemType {
+macro_rules! curated_wikidata_item_types {
+    (
+        $(
+            {
+                key: $key:literal,
+                qid: $qid:literal,
+                label: $label:literal,
+                description: $description:literal $(,)?
+            }
+        ),+ $(,)?
+    ) => {
+        pub const CURATED_WIKIDATA_ITEM_TYPES: &[WikidataItemType] = &[
+            $(
+                WikidataItemType {
+                    key: $key,
+                    qid: $qid,
+                    label: $label,
+                    description: $description,
+                },
+            )+
+        ];
+
+        pub const CURATED_WIKIDATA_ITEM_TYPE_LABELS: &[&str] = &[
+            $(
+                $label,
+            )+
+        ];
+
+        pub const CURATED_WIKIDATA_ITEM_TYPE_KEYS: &[&str] = &[
+            $(
+                $key,
+            )+
+        ];
+    };
+}
+
+curated_wikidata_item_types! {
+    {
         key: "anime-tv-series",
         qid: "Q63952888",
         label: "anime television series",
         description: "Japanese anime television series",
     },
-    WikidataItemType {
+    {
         key: "tv-series",
         qid: "Q5398426",
         label: "television series",
         description: "series of connected television program episodes",
     },
-    WikidataItemType {
+    {
         key: "film",
         qid: "Q11424",
         label: "film",
         description: "sequence of images that give the impression of movement",
     },
-    WikidataItemType {
+    {
         key: "video-game",
         qid: "Q7889",
         label: "video game",
         description: "electronic game that involves interaction with a user interface",
     },
-    WikidataItemType {
+    {
         key: "manga-series",
         qid: "Q21198342",
         label: "manga series",
         description: "series of manga volumes or chapters",
     },
-    WikidataItemType {
+    {
         key: "book",
         qid: "Q571",
         label: "book",
         description: "medium for recording information",
     },
-    WikidataItemType {
+    {
         key: "novel",
         qid: "Q8261",
         label: "novel",
         description: "long written narrative fiction",
     },
-    WikidataItemType {
+    {
         key: "album",
         qid: "Q482994",
         label: "album",
         description: "collection of audio recordings issued as a single item",
     },
-    WikidataItemType {
+    {
         key: "song",
         qid: "Q7366",
         label: "song",
         description: "musical composition with vocals",
     },
-    WikidataItemType {
+    {
         key: "character",
         qid: "Q95074",
         label: "character",
-        description: "fictional human or non-human character in a narrative work of art"
-    }
-];
+        description: "fictional human or non-human character in a narrative work of art",
+    },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

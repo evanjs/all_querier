@@ -9,16 +9,7 @@ use nu_plugin::{
     EvaluatedCall,
     SimplePluginCommand,
 };
-use nu_protocol::{
-    Category,
-    Example,
-    LabeledError,
-    Signature,
-    Span,
-    SyntaxShape,
-    Value,
-};
-
+use nu_protocol::{Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value};
 use crate::AllQuerierPlugin;
 
 pub struct QueryWikidata;
@@ -37,17 +28,27 @@ impl SimplePluginCommand for QueryWikidata {
                 SyntaxShape::String,
                 "Search query/title, e.g. 'tier harribel'",
             )
-            .named(
-                "type",
-                SyntaxShape::String,
-                "Curated Wikidata item type, e.g. character",
-                Some('t'),
+            .param(
+                Flag::new("type")
+                    .short('t')
+                    .arg(SyntaxShape::String)
+                    .desc("Curated Wikidata item type, e.g. character")
+                    .completion(
+                        Completion::new_list(
+                            allq_wikidata::CURATED_WIKIDATA_ITEM_TYPE_LABELS
+                        )
+                    )
             )
-            .named(
-                "link",
-                SyntaxShape::String,
-                "Supported external provider link alias, e.g. waifu",
-                Some('L'),
+            .param(
+                Flag::new("link")
+                    .short('L')
+                    .arg(SyntaxShape::String)
+                    .desc("Supported external provider link alias, e.g. waifu")
+                    .completion(
+                        Completion::new_list(
+                            allq_providers::SUPPORTED_PROVIDER_LINK_PRIMARY_ALIASES
+                        )
+                    )
             )
             .named(
                 "limit",

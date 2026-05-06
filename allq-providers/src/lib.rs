@@ -91,6 +91,87 @@ impl ProviderLinkRoute {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SupportedProviderLink {
+    pub primary_alias: &'static str,
+    pub aliases: &'static [&'static str],
+    pub source: &'static str,
+    pub property_id: &'static str,
+    pub supported_item_types: &'static [&'static str],
+    pub description: &'static str,
+}
+
+macro_rules! supported_provider_links {
+    (
+        $(
+            {
+                primary_alias: $primary_alias:literal,
+                aliases: $aliases:path,
+                source: $source:literal,
+                property_id: $property_id:literal,
+                supported_item_types: [$($supported_item_type:literal),+ $(,)?],
+                description: $description:literal $(,)?
+            }
+        ),+ $(,)?
+    ) => {
+        pub const SUPPORTED_PROVIDER_LINKS: &[SupportedProviderLink] = &[
+            $(
+                SupportedProviderLink {
+                    primary_alias: $primary_alias,
+                    aliases: $aliases,
+                    source: $source,
+                    property_id: $property_id,
+                    supported_item_types: &[
+                        $(
+                            $supported_item_type,
+                        )+
+                    ],
+                    description: $description,
+                },
+            )+
+        ];
+
+        pub const SUPPORTED_PROVIDER_LINK_PRIMARY_ALIASES: &[&str] = &[
+            $(
+                $primary_alias,
+            )+
+        ];
+    };
+}
+
+supported_provider_links! {
+    {
+        primary_alias: "waifu",
+        aliases: mywaifulist::LINK_ALIASES,
+        source: "mywaifulist",
+        property_id: "P13031",
+        supported_item_types: ["character"],
+        description: "Fetch MyWaifuList character page data",
+    },
+}
+
+pub fn supported_provider_links() -> &'static [SupportedProviderLink] {
+    SUPPORTED_PROVIDER_LINKS
+}
+
+pub fn supported_provider_links_for_type(
+    item_type: Option<&str>,
+) -> impl Iterator<Item = &'static SupportedProviderLink> {
+    let normalized_item_type = item_type.map(normalize_link_key);
+
+    supported_provider_links()
+        .iter()
+        .filter(move |link| {
+            let Some(item_type) = normalized_item_type.as_deref() else {
+                return true;
+            };
+
+            link.supported_item_types
+                .iter()
+                .any(|supported_item_type| supported_item_type.eq_ignore_ascii_case(item_type))
+        })
+}
+
 pub fn resolve_provider_link(link: &str) -> anyhow::Result<ProviderLinkRoute> {
     let normalized_link = normalize_link_key(link);
 
@@ -102,10 +183,11 @@ pub fn resolve_provider_link(link: &str) -> anyhow::Result<ProviderLinkRoute> {
     anyhow::bail!("unsupported link type {link:?}; supported link types: {supported}")
 }
 
-fn supported_provider_link_aliases() -> Vec<&'static str> {
-    let mut aliases = Vec::new();
-    aliases.extend_from_slice(mywaifulist::LINK_ALIASES);
-    aliases
+pub fn supported_provider_link_aliases() -> Vec<&'static str> {
+    supported_provider_links()
+        .iter()
+        .flat_map(|link| link.aliases.iter().copied())
+        .collect()
 }
 
 fn normalize_link_key(link: &str) -> String {

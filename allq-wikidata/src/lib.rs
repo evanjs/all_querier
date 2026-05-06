@@ -24,11 +24,12 @@ pub use properties::{
     DatatypeKey, Properties, Property,
 };
 pub use itemtypes::{
-    CURATED_WIKIDATA_ITEM_TYPES, SearchItemsByInstanceOfOptions, WikidataItemSearchResult,
-    WikidataItemType, curated_wikidata_item_types, resolve_wikidata_item_type_qid,
-    search_items_by_curated_type, search_items_by_instance_of,
-    search_items_by_instance_of_with_options, wikidata_item_type_by_key,
-    wikidata_item_type_by_key_or_label,
+    CURATED_WIKIDATA_ITEM_TYPE_KEYS, CURATED_WIKIDATA_ITEM_TYPE_LABELS,
+    CURATED_WIKIDATA_ITEM_TYPES, SearchItemsByInstanceOfOptions,
+    WikidataItemSearchResult, WikidataItemType, curated_wikidata_item_types,
+    resolve_wikidata_item_type_qid, search_items_by_curated_type,
+    search_items_by_instance_of, search_items_by_instance_of_with_options,
+    wikidata_item_type_by_key, wikidata_item_type_by_key_or_label,
 };
 pub use externallinks::{
     ExternalId,
