@@ -1,12 +1,25 @@
 [workspace]
-resolver = "3"
 members = [
     "allq-cli",
     "allq-providers",
-    "allq-wikidata"
+    "allq-wikidata",
+    "nu_plugin_all_querier",
 ]
+resolver = "3"
 
-[workspace.dependencies]
-tokio = { version = "1.52.1", features = ["rt", "rt-multi-thread", "macros"] }
-allq-wikidata = { path = "./allq-wikidata" }
-allq-providers = { path = "./allq-providers" }
+[workspace.dependencies.allq-providers]
+path = "./allq-providers"
+
+[workspace.dependencies.allq-wikidata]
+path = "./allq-wikidata"
+
+[workspace.dependencies.nu_plugin_all_querier]
+path = "./nu_plugin_all_querier"
+
+[workspace.dependencies.tokio]
+version = "1.52.1"
+features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+]
