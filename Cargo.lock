@@ -55,6 +55,7 @@ name = "allq-cli"
 version = "0.1.0"
 dependencies = [
  "allq-providers",
+ "allq-query",
  "allq-wikidata",
  "anyhow",
  "clap",
@@ -73,6 +74,17 @@ dependencies = [
  "reqwest 0.12.28",
  "serde_json",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "allq-query"
+version = "0.1.0"
+dependencies = [
+ "allq-providers",
+ "allq-wikidata",
+ "anyhow",
+ "serde_json",
  "tracing",
 ]
 

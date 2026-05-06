@@ -1,25 +1,15 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{
     Parser,
     Subcommand,
 };
-use serde_json::{
-    Map,
-    Value,
+use allq_query::{
+    WikidataQueryOptions,
+    WikidataQueryResult,
+    query_wikidata,
 };
-
-use allq_providers::{
-    ExternalIdPageProvider,
-    ProviderHttpClient,
-    ProviderPageData,
-    resolve_provider_link,
-};
-use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -252,105 +242,42 @@ async fn try_main() -> anyhow::Result<()> {
             json,
             pretty,
         } => {
-            let type_qid = match (item_type, type_qid) {
-                (Some(item_type), None) => {
-                    allq_wikidata::resolve_wikidata_item_type_qid(&item_type)?
-                }
-                (None, Some(type_qid)) => {
-                    allq_wikidata::resolve_wikidata_item_type_qid(&type_qid)?
-                }
-                (None, None) => {
-                    anyhow::bail!("provide either --type or --type-qid");
-                }
-                (Some(_), Some(_)) => {
-                    anyhow::bail!("provide only one of --type or --type-qid");
-                }
-            };
-
-            let rows = allq_wikidata::search_items_by_instance_of_with_options(
-                &type_qid,
-                &query,
-                allq_wikidata::SearchItemsByInstanceOfOptions {
-                    output_limit: Some(limit),
-                    candidate_limit,
-                    include_subclasses: !direct_only,
-                    debug_query,
-                    cache_only,
-                    force_fetch,
-                },
-            )
+            let result = query_wikidata(WikidataQueryOptions {
+                item_type: item_type.as_deref(),
+                type_qid: type_qid.as_deref(),
+                query: &query,
+                link: link.as_deref(),
+                limit,
+                candidate_limit,
+                cache_only,
+                force_fetch,
+                direct_only,
+                debug_query,
+                annotate_properties,
+            })
                 .await?;
-
-            let lookup_mode = if cache_only {
-                allq_wikidata::WikidataEntityLookupMode::CacheOnly
-            } else if force_fetch {
-                allq_wikidata::WikidataEntityLookupMode::ForceFetch
-            } else {
-                allq_wikidata::WikidataEntityLookupMode::NetworkFallback
-            };
-
-            if debug_query {
-                eprintln!(
-                    "debug: hydrating {} search-item result(s) via entity-by-qid",
-                    rows.len()
-                );
-                eprintln!("debug: entity lookup mode={lookup_mode:?}");
-            }
-
-            let client = if cache_only {
-                allq_wikidata::WikidataClient::new_local_only().await?
-            } else {
-                allq_wikidata::WikidataClient::new().await?
-            };
-
-            let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
-
-            if let Some(link) = link {
-                let provider_http_client = ProviderHttpClient::new()?;
-                let followed = follow_search_item_link(
-                    &client,
-                    &provider_http_client,
-                    &entities,
-                    lookup_mode,
-                    &link,
-                )
-                    .await?;
-
-                if json {
-                    println!("{}", serde_json::to_string(&followed)?);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&followed)?);
-                }
-
-                return Ok(());
-            }
-
-            allq_wikidata::add_external_links_to_entities(
-                &mut entities,
-                &client,
-                lookup_mode,
-            )
-                .await?;
-
-            if annotate_properties {
-                let property_names = wikidata_property_names_by_id().await?;
-                annotate_entities_with_property_names(&mut entities, &property_names);
-            }
 
             if json {
-                println!("{}", serde_json::to_string(&entities)?);
-            } else if pretty {
-                println!("{}", serde_json::to_string_pretty(&entities)?);
+                println!("{}", serde_json::to_string(&result.to_json_value())?);
+            } else if pretty || link.is_some() {
+                println!("{}", serde_json::to_string_pretty(&result.to_json_value())?);
             } else {
-                println!("id\tlabel\tdescription");
+                match result {
+                    WikidataQueryResult::Entities { rows, .. } => {
+                        println!("id\tlabel\tdescription");
 
-                for row in rows {
-                    println!(
-                        "{}\t{}\t{}",
-                        clean_tsv_field(&row.id),
-                        clean_tsv_field(&row.label),
-                        clean_tsv_field(row.description.as_deref().unwrap_or(""))
-                    );
+                        for row in rows {
+                            println!(
+                                "{}\t{}\t{}",
+                                clean_tsv_field(&row.id),
+                                clean_tsv_field(&row.label),
+                                clean_tsv_field(row.description.as_deref().unwrap_or(""))
+                            );
+                        }
+                    }
+                    WikidataQueryResult::FollowedLink { value } => {
+                        println!("{}", serde_json::to_string_pretty(&value)?);
+                    }
                 }
             }
         },
@@ -365,155 +292,6 @@ async fn try_main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-async fn hydrate_search_item_entities(
-    client: &allq_wikidata::WikidataClient,
-    rows: &[allq_wikidata::WikidataItemSearchResult],
-    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
-) -> anyhow::Result<Vec<Value>> {
-    let mut entities = Vec::with_capacity(rows.len());
-
-    for row in rows {
-        let response = client.entity_by_qid_with_mode(&row.id, lookup_mode).await?;
-        let entity = response
-            .get("entities")
-            .and_then(|entities| entities.get(&row.id))
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {}", row.id))?;
-
-        entities.push(entity);
-    }
-
-    Ok(entities)
-}
-
-async fn follow_search_item_link(
-    client: &allq_wikidata::WikidataClient,
-    provider_http_client: &ProviderHttpClient,
-    entities: &[Value],
-    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
-    link: &str,
-) -> anyhow::Result<Value> {
-    let route = resolve_provider_link(link)?;
-
-    debug!(
-        link,
-        source = route.source(),
-        property_id = route.property_id(),
-        "resolved external link route",
-    );
-
-    let entity = entities
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("search-item produced no entities to follow"))?;
-
-    let external_ids = allq_wikidata::external_ids_for_entity(
-        entity,
-        client,
-        lookup_mode,
-    )
-        .await?;
-
-    let external_id = external_ids
-        .iter()
-        .find(|external_id| {
-            external_id.property_id == route.property_id()
-                && external_id.source.as_deref() == Some(route.source())
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "resolved Wikidata item has no supported {link} external ID; expected {} / {}",
-                route.property_id(),
-                route.source(),
-            )
-        })?;
-
-    debug!(
-        wikidata_qid = external_id.wikidata_qid.as_deref().unwrap_or(""),
-        property_id = external_id.property_id,
-        source = external_id.source.as_deref().unwrap_or(""),
-        value = external_id.value,
-        "resolved provider external ID",
-    );
-
-    let provider = route.provider();
-    let page_data = fetch_provider_page_data_with_cache(
-        client,
-        provider_http_client,
-        provider,
-        &external_id.value,
-        lookup_mode,
-    )
-        .await?;
-
-    provider.parse_page_data(&page_data)
-}
-
-async fn fetch_provider_page_data_with_cache<P>(
-    client: &allq_wikidata::WikidataClient,
-    provider_http_client: &ProviderHttpClient,
-    provider: &P,
-    value: &str,
-    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
-) -> anyhow::Result<ProviderPageData>
-where
-    P: ExternalIdPageProvider + Sync + ?Sized,
-{
-    let cache_key = provider_page_cache_key(provider.source(), value);
-
-    if lookup_mode != allq_wikidata::WikidataEntityLookupMode::ForceFetch {
-        if let Some(cache) = client.cache_as_ref() {
-            if let Some(entry) = cache.get(&cache_key).await? {
-                debug!(
-                        cache_key = %cache_key,
-                        source = provider.source(),
-                        value,
-                        "provider page cache hit",
-                    );
-
-                return Ok(ProviderPageData {
-                    source: provider.source(),
-                    url: provider.page_url(value),
-                    body: entry.value().clone(),
-                });
-            }
-        }
-    }
-
-    if lookup_mode == allq_wikidata::WikidataEntityLookupMode::CacheOnly {
-        anyhow::bail!(
-                "provider page {}:{value} was not found in the local cache",
-                provider.source(),
-            );
-    }
-
-    debug!(
-            cache_key = %cache_key,
-            source = provider.source(),
-            value,
-            "provider page cache miss; fetching",
-        );
-
-    let page_data = provider.fetch_page_data(provider_http_client, value).await?;
-
-    if let Some(cache) = client.cache_as_ref() {
-        cache.insert(cache_key.clone(), page_data.body.clone());
-
-        debug!(
-                cache_key = %cache_key,
-                source = provider.source(),
-                value,
-                bytes = page_data.body.len(),
-                "stored provider page in cache",
-            );
-    }
-
-    Ok(page_data)
-}
-
-fn provider_page_cache_key(source: &str, value: &str) -> String {
-    format!("external_page:{source}:{value}")
 }
 
 fn normalize_link_key(link: &str) -> String {
@@ -538,87 +316,6 @@ fn init_logging(debug_logging: bool) -> anyhow::Result<()> {
         .try_init();
 
     Ok(())
-}
-async fn wikidata_property_names_by_id() -> anyhow::Result<HashMap<String, String>> {
-    let properties = allq_wikidata::list_properties_id_name_description_json(false).await?;
-
-    Ok(properties
-        .into_iter()
-        .map(|property| (property.id, property.name))
-        .collect())
-}
-
-fn annotate_entities_with_property_names(
-    entities: &mut [Value],
-    property_names: &HashMap<String, String>,
-) {
-    for entity in entities {
-        add_entity_claim_property_names(entity, property_names);
-        annotate_value_property_names(entity, property_names);
-    }
-}
-
-fn add_entity_claim_property_names(
-    entity: &mut Value,
-    property_names: &HashMap<String, String>,
-) {
-    let Some(claims) = entity
-        .get("claims")
-        .and_then(Value::as_object)
-    else {
-        return;
-    };
-
-    let names = claims
-        .keys()
-        .filter_map(|property_id| {
-            property_names
-                .get(property_id)
-                .map(|name| (property_id.clone(), Value::String(name.clone())))
-        })
-        .collect::<Map<String, Value>>();
-
-    if names.is_empty() {
-        return;
-    }
-
-    if let Some(entity) = entity.as_object_mut() {
-        entity.insert("propertyNames".to_string(), Value::Object(names));
-    }
-}
-
-fn annotate_value_property_names(
-    value: &mut Value,
-    property_names: &HashMap<String, String>,
-) {
-    match value {
-        Value::Object(object) => {
-            if let Some(property_id) = object
-                .get("property")
-                .and_then(Value::as_str)
-            {
-                if let Some(property_name) = property_names.get(property_id) {
-                    object.insert(
-                        "propertyName".to_string(),
-                        Value::String(property_name.clone()),
-                    );
-                }
-            }
-
-            for value in object.values_mut() {
-                annotate_value_property_names(value, property_names);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                annotate_value_property_names(value, property_names);
-            }
-        }
-        Value::Null
-        | Value::Bool(_)
-        | Value::Number(_)
-        | Value::String(_) => {}
-    }
 }
 
 fn print_external_ids_tsv(external_ids: &[allq_wikidata::ExternalId]) {

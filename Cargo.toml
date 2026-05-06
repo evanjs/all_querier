@@ -2,6 +2,7 @@
 members = [
     "allq-cli",
     "allq-providers",
+    "allq-query",
     "allq-wikidata",
     "nu_plugin_all_querier",
 ]
@@ -10,11 +11,21 @@ resolver = "3"
 [workspace.dependencies.allq-providers]
 path = "./allq-providers"
 
+[workspace.dependencies.allq-query]
+path = "./allq-query"
+
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"
 
 [workspace.dependencies.nu_plugin_all_querier]
 path = "./nu_plugin_all_querier"
+
+[workspace.dependencies.tracing]
+version = "0.1"
+
+[workspace.dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter", "fmt"]
 
 [workspace.dependencies.tokio]
 version = "1.52.1"

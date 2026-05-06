@@ -1,0 +1,11 @@
+[package]
+name = "allq-query"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+serde_json = "1.0.149"
+allq-providers = { workspace = true }
+allq-wikidata = { workspace = true }
+tracing = { workspace = true }
