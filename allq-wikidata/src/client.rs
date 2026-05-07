@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::Context;
 use mediawiki::prelude::*;
 use serde_json::Value;
+use tokio::sync::OnceCell;
 
 use crate::cache::{
     WikidataCache, create_wikidata_cache,
@@ -19,7 +20,7 @@ const DEFAULT_FORMAT_VERSION: &str = "2";
 const DEFAULT_MAXLAG: &str = "5";
 
 pub struct WikidataClient {
-    api: Option<Api>,
+    api: Option<OnceCell<Api>>,
     cache: Option<WikidataCache>,
 }
 
@@ -32,11 +33,10 @@ pub enum WikidataEntityLookupMode {
 
 impl WikidataClient {
     pub async fn new() -> anyhow::Result<Self> {
-        let api = wikidata_api().await?;
         let cache = create_wikidata_cache().await?;
 
         Ok(Self {
-            api: Some(api),
+            api: Some(OnceCell::new()),
             cache: Some(cache),
         })
     }
@@ -51,16 +51,22 @@ impl WikidataClient {
     }
 
     pub fn from_api(api: Api) -> Self {
+        let api_cell = OnceCell::new();
+        let _ = api_cell.set(api);
+
         Self {
-            api: Some(api),
+            api: Some(api_cell),
             cache: None,
         }
     }
 
-    pub fn api(&self) -> anyhow::Result<&Api> {
-        self.api
+    pub async fn api(&self) -> anyhow::Result<&Api> {
+        let api = self
+            .api
             .as_ref()
-            .context("Wikidata API is unavailable in local-only cache lookup mode")
+            .context("Wikidata API is unavailable in local-only cache lookup mode")?;
+
+        api.get_or_try_init(wikidata_api).await
     }
 
     pub async fn userinfo(&self) -> anyhow::Result<Value> {
@@ -222,16 +228,11 @@ impl WikidataClient {
     }
 
     pub async fn query_api_json(&self, params: &HashMap<String, String>) -> anyhow::Result<Value> {
-        let api = self
-            .api
-            .as_ref()
-            .context("Wikidata API is unavailable in local-only cache lookup mode")?;
-
-        Ok(api.get_query_api_json(params).await?)
+        Ok(self.api().await?.get_query_api_json(params).await?)
     }
 
     pub async fn sparql_query_json(&self, query: &str) -> anyhow::Result<Value> {
-        Ok(self.api()?.sparql_query(query).await?)
+        Ok(self.api().await?.sparql_query(query).await?)
     }
 
     pub fn cache_as_ref(&self) -> Option<&WikidataCache> {
