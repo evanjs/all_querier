@@ -1,9 +1,29 @@
 use nu_plugin::{MsgPackSerializer, Plugin, PluginCommand, serve_plugin};
+use tracing_subscriber::EnvFilter;
 
 mod commands;
 pub use commands::*;
 
 pub struct AllQuerierPlugin;
+
+pub fn init_logging(verbose: bool) -> anyhow::Result<()> {
+    let env_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        EnvFilter::try_new(rust_log)?
+    } else if verbose {
+        EnvFilter::try_new(
+            "warn,allq_query=debug,allq_providers=debug,allq_wikidata=debug,nu_plugin_all_querier=debug",
+        )?
+    } else {
+        EnvFilter::try_new("warn")?
+    };
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    Ok(())
+}
 
 impl Plugin for AllQuerierPlugin {
     fn version(&self) -> String {

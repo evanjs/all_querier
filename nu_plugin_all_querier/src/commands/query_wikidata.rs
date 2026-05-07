@@ -4,7 +4,10 @@ use nu_plugin::{
     SimplePluginCommand,
 };
 use nu_protocol::{Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value};
-use crate::AllQuerierPlugin;
+use crate::{
+    AllQuerierPlugin,
+    init_logging,
+};
 
 pub struct QueryWikidata;
 
@@ -65,6 +68,11 @@ impl SimplePluginCommand for QueryWikidata {
                 "Add computed externalLinks metadata to hydrated Wikidata entities",
                 None,
             )
+            .switch(
+                "verbose",
+                "Enable verbose diagnostic logging to stderr",
+                Some('v'),
+            )
             .category(Category::Experimental)
     }
 
@@ -101,7 +109,11 @@ impl SimplePluginCommand for QueryWikidata {
         let force_fetch = call.has_flag("force-fetch")?;
         let direct_only = call.has_flag("direct-only")?;
         let external_links = call.has_flag("external-links")?;
+        let verbose = call.has_flag("verbose")?;
         let head = call.head;
+
+        init_logging(verbose)
+            .map_err(|error| labeled_error(head, "Failed to initialize logging", error))?;
 
         if cache_only && force_fetch {
             return Err(LabeledError::new("Conflicting flags")
@@ -121,6 +133,7 @@ impl SimplePluginCommand for QueryWikidata {
                 force_fetch,
                 direct_only,
                 external_links,
+                verbose,
             ))
             .map_err(|error| labeled_error(head, "Wikidata query failed", error))?;
 
@@ -138,6 +151,7 @@ async fn run_query_wikidata(
     force_fetch: bool,
     direct_only: bool,
     external_links: bool,
+    verbose: bool,
 ) -> anyhow::Result<serde_json::Value> {
     let result = allq_query::query_wikidata(allq_query::WikidataQueryOptions {
         item_type: Some(item_type),
@@ -149,7 +163,7 @@ async fn run_query_wikidata(
         cache_only,
         force_fetch,
         direct_only,
-        debug_query: false,
+        debug_query: verbose,
         annotate_properties: false,
         enrich_external_links: external_links,
     })

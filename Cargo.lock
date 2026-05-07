@@ -99,6 +99,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2443,6 +2444,7 @@ dependencies = [
  "nu-protocol",
  "serde_json",
  "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]

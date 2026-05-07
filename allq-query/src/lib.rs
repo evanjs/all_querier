@@ -90,6 +90,18 @@ pub async fn query_wikidata(
 
     let client = wikidata_client(options.cache_only).await?;
 
+    if should_prewarm_wikidata_api(options.cache_only) {
+        let api_started_at = Instant::now();
+        client.api().await?;
+
+        if options.debug_query {
+            eprintln!(
+                "debug: Wikidata API client prewarm elapsed={:?}",
+                api_started_at.elapsed()
+            );
+        }
+    }
+
     let hydration_started_at = Instant::now();
     let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
 
@@ -177,6 +189,10 @@ pub async fn wikidata_client(
     } else {
         allq_wikidata::WikidataClient::new().await
     }
+}
+
+fn should_prewarm_wikidata_api(cache_only: bool) -> bool {
+    !cache_only && std::env::var_os("ALLQ_PREWARM_WIKIDATA_API").is_some()
 }
 
 fn provider_page_cache_key(source: &str, value: &str) -> String {

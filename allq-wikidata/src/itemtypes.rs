@@ -299,6 +299,10 @@ pub async fn search_items_by_instance_of_with_options(
         eprintln!("debug: candidate_limit={candidate_limit}");
         eprintln!("debug: include_subclasses={}", options.include_subclasses);
         eprintln!("debug: SPARQL query:\n{sparql}");
+        eprintln!(
+            "debug: WDQS URL: https://query.wikidata.org/#{}",
+            url_fragment_escape(&sparql),
+        );
     }
 
     let client = WikidataClient::new().await?;
@@ -472,6 +476,29 @@ fn search_items_by_instance_of_cache_key(
         "search_items_by_instance_of:v1:{}",
         serde_json::to_string(&key_data)?
     ))
+}
+
+fn url_fragment_escape(value: &str) -> String {
+    let mut escaped = String::new();
+
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~' => escaped.push(byte as char),
+            b' ' => escaped.push_str("%20"),
+            b'\n' => escaped.push_str("%0A"),
+            b'\r' => escaped.push_str("%0D"),
+            b'\t' => escaped.push_str("%09"),
+            _ => escaped.push_str(&format!("%{byte:02X}")),
+        }
+    }
+
+    escaped
 }
 
 fn sparql_string_escape(value: &str) -> String {
