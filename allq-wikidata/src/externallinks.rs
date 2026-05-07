@@ -39,6 +39,47 @@ pub async fn external_ids_by_qid(qid: &str, client: &WikidataClient, lookup_mode
     external_ids_for_entity(entity, client, lookup_mode).await
 }
 
+async fn fetch_properties_external_link_metadata(
+    client: &WikidataClient,
+    property_ids: &[String],
+    lookup_mode: WikidataEntityLookupMode,
+) -> anyhow::Result<HashMap<String, PropertyExternalLinkMetadata>> {
+    let response = client
+        .entities_by_qids_with_mode(property_ids, lookup_mode)
+        .await?;
+
+    let entities = response
+        .get("entities")
+        .and_then(Value::as_object)
+        .context("property entities response did not include entities")?;
+
+    let mut metadata_by_property = HashMap::new();
+
+    for property_id in property_ids {
+        let property_entity = entities
+            .get(property_id)
+            .with_context(|| {
+                format!("Wikidata property response did not include {property_id}")
+            })?;
+
+        metadata_by_property.insert(
+            property_id.clone(),
+            PropertyExternalLinkMetadata {
+                label: english_label(property_entity),
+                formatter_urls: string_claim_values(property_entity, FORMATTER_URL_PROPERTY),
+                third_party_formatter_urls: string_claim_values(
+                    property_entity,
+                    THIRD_PARTY_FORMATTER_URL_PROPERTY,
+                ),
+                url_match_patterns: string_claim_values(property_entity, URL_MATCH_PATTERN_PROPERTY),
+                id_regexes: string_claim_values(property_entity, ID_REGEX_PROPERTY),
+            },
+        );
+    }
+
+    Ok(metadata_by_property)
+}
+
 pub async fn external_ids_for_entity(entity: &Value, client: &WikidataClient, lookup_mode: WikidataEntityLookupMode) -> anyhow::Result<Vec<ExternalId>> {
     let claims = collect_external_id_claims(entity);
     let wikidata_qid = entity.get("id").and_then(Value::as_str).map(ToString::to_string);
@@ -135,24 +176,32 @@ pub async fn add_external_links_to_entity(
         return Ok(());
     }
 
-    let mut metadata_by_property = HashMap::<String, PropertyExternalLinkMetadata>::new();
+    let mut property_ids = claims
+        .iter()
+        .map(|claim| claim.property_id.clone())
+        .collect::<Vec<_>>();
+
+    property_ids.sort();
+    property_ids.dedup();
+
+    let metadata_by_property = fetch_properties_external_link_metadata(
+        client,
+        &property_ids,
+        lookup_mode,
+    )
+        .await?;
+
     let mut external_links = Vec::new();
 
     for claim in claims {
-        if !metadata_by_property.contains_key(&claim.property_id) {
-            let metadata = fetch_property_external_link_metadata(
-                client,
-                &claim.property_id,
-                lookup_mode,
-            )
-                .await?;
-
-            metadata_by_property.insert(claim.property_id.clone(), metadata);
-        }
-
         let metadata = metadata_by_property
             .get(&claim.property_id)
-            .expect("metadata was just inserted");
+            .with_context(|| {
+                format!(
+                    "external-link metadata response did not include {}",
+                    claim.property_id,
+                )
+            })?;
 
         let mut urls = Vec::new();
         append_formatted_urls(&mut urls, &metadata.formatter_urls, &claim.value);

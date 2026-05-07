@@ -122,6 +122,105 @@ impl WikidataClient {
         Ok(res)
     }
 
+    pub async fn entities_by_qids_with_mode(
+        &self,
+        qids: &[String],
+        lookup_mode: WikidataEntityLookupMode,
+    ) -> anyhow::Result<Value> {
+        let mut qids = qids
+            .iter()
+            .map(|qid| normalize_qid(qid).map(ToString::to_string))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        qids.sort();
+        qids.dedup();
+
+        let mut entities = serde_json::Map::new();
+        let mut missing_qids = Vec::new();
+
+        if lookup_mode != WikidataEntityLookupMode::ForceFetch {
+            if let Some(cache) = &self.cache {
+                for qid in &qids {
+                    let cache_key = wikidata_entity_cache_key(qid);
+
+                    if let Some(entry) = cache.get(&cache_key).await? {
+                        let s = entry.value().clone();
+                        let parsed = serde_json::from_str::<Value>(&s)?;
+
+                        if let Some(entity) = parsed
+                            .get("entities")
+                            .and_then(|entities| entities.get(qid))
+                            .cloned()
+                        {
+                            entities.insert(qid.clone(), entity);
+                            continue;
+                        }
+                    }
+
+                    missing_qids.push(qid.clone());
+                }
+            } else {
+                missing_qids.extend(qids.iter().cloned());
+            }
+        } else {
+            missing_qids.extend(qids.iter().cloned());
+        }
+
+        if lookup_mode == WikidataEntityLookupMode::CacheOnly && !missing_qids.is_empty() {
+            anyhow::bail!(
+                    "Wikidata entities were not found in the local cache: {}",
+                    missing_qids.join(", "),
+                );
+        }
+
+        if !missing_qids.is_empty() {
+            let ids = missing_qids.join("|");
+            let params = query_params(&[
+                ("action", "wbgetentities"),
+                ("ids", &ids),
+                ("props", ENTITY_QUERY_PROPS),
+                ("languages", DEFAULT_LANGUAGE),
+                ("format", DEFAULT_FORMAT),
+                ("formatversion", DEFAULT_FORMAT_VERSION),
+                ("maxlag", DEFAULT_MAXLAG),
+            ]);
+
+            let res = self.query_api_json(&params).await?;
+            let fetched_entities = res
+                .get("entities")
+                .and_then(Value::as_object)
+                .context("Wikidata entity response is missing entities object")?;
+
+            for qid in &missing_qids {
+                let entity = fetched_entities
+                    .get(qid)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {qid}"))?;
+
+                entities.insert(qid.clone(), entity.clone());
+
+                if should_cache_wikidata_response(&res) {
+                    if let Some(cache) = &self.cache {
+                        let mut single_entities = serde_json::Map::new();
+                        single_entities.insert(qid.clone(), entity);
+
+                        let single_entity_response = serde_json::json!({
+                                "entities": single_entities,
+                            });
+                        let cache_key = wikidata_entity_cache_key(qid);
+                        let s = serde_json::to_string(&single_entity_response)?;
+
+                        cache.insert(cache_key, s);
+                    }
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+                "entities": entities,
+            }))
+    }
+
     pub async fn query_api_json(&self, params: &HashMap<String, String>) -> anyhow::Result<Value> {
         let api = self
             .api

@@ -2435,6 +2435,7 @@ name = "nu_plugin_all_querier"
 version = "0.1.0+0.112.2"
 dependencies = [
  "allq-providers",
+ "allq-query",
  "allq-wikidata",
  "anyhow",
  "nu-plugin",

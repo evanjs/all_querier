@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-
+use std::time::Instant;
 use allq_providers::{
     ExternalIdPageProvider,
     ProviderHttpClient,
@@ -24,6 +24,7 @@ pub struct WikidataQueryOptions<'a> {
     pub direct_only: bool,
     pub debug_query: bool,
     pub annotate_properties: bool,
+    pub enrich_external_links: bool,
 }
 
 pub enum WikidataQueryResult {
@@ -57,6 +58,8 @@ pub async fn query_wikidata(
 ) -> anyhow::Result<WikidataQueryResult> {
     let type_qid = resolve_query_type_qid(options.item_type, options.type_qid)?;
 
+    let search_started_at = Instant::now();
+
     let rows = allq_wikidata::search_items_by_instance_of_with_options(
         &type_qid,
         options.query,
@@ -71,18 +74,28 @@ pub async fn query_wikidata(
     )
         .await?;
 
+    if options.debug_query {
+        eprintln!("debug: search-item elapsed={:?}", search_started_at.elapsed());
+    }
+
     let lookup_mode = wikidata_lookup_mode(options.cache_only, options.force_fetch);
 
     if options.debug_query {
         eprintln!(
-            "debug: hydrating {} search-item result(s) via entity-by-qid",
+            "debug: hydrating {} search-item result(s) via batched entity-by-qid",
             rows.len()
         );
         eprintln!("debug: entity lookup mode={lookup_mode:?}");
     }
 
     let client = wikidata_client(options.cache_only).await?;
+
+    let hydration_started_at = Instant::now();
     let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+
+    if options.debug_query {
+        eprintln!("debug: hydration elapsed={:?}", hydration_started_at.elapsed());
+    }
 
     if let Some(link) = options.link {
         let provider_http_client = ProviderHttpClient::new()?;
@@ -98,12 +111,30 @@ pub async fn query_wikidata(
         return Ok(WikidataQueryResult::FollowedLink { value });
     }
 
-    allq_wikidata::add_external_links_to_entities(
-        &mut entities,
-        &client,
-        lookup_mode,
-    )
-        .await?;
+    if options.enrich_external_links {
+        let external_links_started_at = Instant::now();
+
+        if options.debug_query {
+            eprintln!(
+                "debug: enriching external links for {} hydrated entity/entities",
+                entities.len()
+            );
+        }
+
+        allq_wikidata::add_external_links_to_entities(
+            &mut entities,
+            &client,
+            lookup_mode,
+        )
+            .await?;
+
+        if options.debug_query {
+            eprintln!(
+                "debug: external-link enrichment elapsed={:?}",
+                external_links_started_at.elapsed()
+            );
+        }
+    }
 
     if options.annotate_properties {
         let property_names = wikidata_property_names_by_id().await?;
@@ -157,20 +188,25 @@ pub async fn hydrate_search_item_entities(
     rows: &[allq_wikidata::WikidataItemSearchResult],
     lookup_mode: allq_wikidata::WikidataEntityLookupMode,
 ) -> anyhow::Result<Vec<Value>> {
-    let mut entities = Vec::with_capacity(rows.len());
+    let qids = rows
+        .iter()
+        .map(|row| row.id.clone())
+        .collect::<Vec<_>>();
 
-    for row in rows {
-        let response = client.entity_by_qid_with_mode(&row.id, lookup_mode).await?;
-        let entity = response
-            .get("entities")
-            .and_then(|entities| entities.get(&row.id))
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {}", row.id))?;
+    let response = client
+        .entities_by_qids_with_mode(&qids, lookup_mode)
+        .await?;
 
-        entities.push(entity);
-    }
-
-    Ok(entities)
+    rows
+        .iter()
+        .map(|row| {
+            response
+                .get("entities")
+                .and_then(|entities| entities.get(&row.id))
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {}", row.id))
+        })
+        .collect()
 }
 
 pub async fn follow_search_item_link(

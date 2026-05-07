@@ -1,9 +1,3 @@
-use allq_providers::{
-    ExternalIdPageProvider,
-    ProviderHttpClient,
-    ProviderPageData,
-    resolve_provider_link,
-};
 use nu_plugin::{
     EngineInterface,
     EvaluatedCall,
@@ -62,13 +56,13 @@ impl SimplePluginCommand for QueryWikidata {
                 None,
             )
             .switch(
-                "force-fetch",
-                "Ignore cached data and fetch from Wikidata/provider APIs",
+                "direct-only",
+                "Only match direct P31 values; do not include subclasses via P279",
                 None,
             )
             .switch(
-                "direct-only",
-                "Only match direct P31 values; do not include subclasses via P279",
+                "external-links",
+                "Add computed externalLinks metadata to hydrated Wikidata entities",
                 None,
             )
             .category(Category::Experimental)
@@ -106,6 +100,7 @@ impl SimplePluginCommand for QueryWikidata {
         let cache_only = call.has_flag("cache-only")?;
         let force_fetch = call.has_flag("force-fetch")?;
         let direct_only = call.has_flag("direct-only")?;
+        let external_links = call.has_flag("external-links")?;
         let head = call.head;
 
         if cache_only && force_fetch {
@@ -125,6 +120,7 @@ impl SimplePluginCommand for QueryWikidata {
                 cache_only,
                 force_fetch,
                 direct_only,
+                external_links,
             ))
             .map_err(|error| labeled_error(head, "Wikidata query failed", error))?;
 
@@ -141,173 +137,25 @@ async fn run_query_wikidata(
     cache_only: bool,
     force_fetch: bool,
     direct_only: bool,
+    external_links: bool,
 ) -> anyhow::Result<serde_json::Value> {
-    let type_qid = allq_wikidata::resolve_wikidata_item_type_qid(item_type)?;
-
-    let rows = allq_wikidata::search_items_by_instance_of_with_options(
-        &type_qid,
+    let result = allq_query::query_wikidata(allq_query::WikidataQueryOptions {
+        item_type: Some(item_type),
+        type_qid: None,
         query,
-        allq_wikidata::SearchItemsByInstanceOfOptions {
-            output_limit: Some(limit),
-            candidate_limit: None,
-            include_subclasses: !direct_only,
-            debug_query: false,
-            cache_only,
-            force_fetch,
-        },
-    )
+        link,
+        limit,
+        candidate_limit: None,
+        cache_only,
+        force_fetch,
+        direct_only,
+        debug_query: false,
+        annotate_properties: false,
+        enrich_external_links: external_links,
+    })
         .await?;
 
-    let lookup_mode = if cache_only {
-        allq_wikidata::WikidataEntityLookupMode::CacheOnly
-    } else if force_fetch {
-        allq_wikidata::WikidataEntityLookupMode::ForceFetch
-    } else {
-        allq_wikidata::WikidataEntityLookupMode::NetworkFallback
-    };
-
-    let client = if cache_only {
-        allq_wikidata::WikidataClient::new_local_only().await?
-    } else {
-        allq_wikidata::WikidataClient::new().await?
-    };
-
-    let entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
-
-    if let Some(link) = link {
-        let provider_http_client = ProviderHttpClient::new()?;
-
-        return follow_search_item_link(
-            &client,
-            &provider_http_client,
-            &entities,
-            lookup_mode,
-            link,
-        )
-            .await;
-    }
-
-    let mut entities = entities;
-    allq_wikidata::add_external_links_to_entities(
-        &mut entities,
-        &client,
-        lookup_mode,
-    )
-        .await?;
-
-    Ok(serde_json::Value::Array(entities))
-}
-
-async fn hydrate_search_item_entities(
-    client: &allq_wikidata::WikidataClient,
-    rows: &[allq_wikidata::WikidataItemSearchResult],
-    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
-) -> anyhow::Result<Vec<serde_json::Value>> {
-    let mut entities = Vec::with_capacity(rows.len());
-
-    for row in rows {
-        let response = client.entity_by_qid_with_mode(&row.id, lookup_mode).await?;
-        let entity = response
-            .get("entities")
-            .and_then(|entities| entities.get(&row.id))
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {}", row.id))?;
-
-        entities.push(entity);
-    }
-
-    Ok(entities)
-}
-
-async fn follow_search_item_link(
-    client: &allq_wikidata::WikidataClient,
-    provider_http_client: &ProviderHttpClient,
-    entities: &[serde_json::Value],
-    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
-    link: &str,
-) -> anyhow::Result<serde_json::Value> {
-    let route = resolve_provider_link(link)?;
-
-    let entity = entities
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("Wikidata search produced no entities to follow"))?;
-
-    let external_ids = allq_wikidata::external_ids_for_entity(
-        entity,
-        client,
-        lookup_mode,
-    )
-        .await?;
-
-    let external_id = external_ids
-        .iter()
-        .find(|external_id| {
-            external_id.property_id == route.property_id()
-                && external_id.source.as_deref() == Some(route.source())
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "resolved Wikidata item has no supported {link} external ID; expected {} / {}",
-                route.property_id(),
-                route.source(),
-            )
-        })?;
-
-    let provider = route.provider();
-    let page_data = fetch_provider_page_data_with_cache(
-        client,
-        provider_http_client,
-        provider,
-        &external_id.value,
-        lookup_mode,
-    )
-        .await?;
-
-    provider.parse_page_data(&page_data)
-}
-
-async fn fetch_provider_page_data_with_cache<P>(
-    client: &allq_wikidata::WikidataClient,
-    provider_http_client: &ProviderHttpClient,
-    provider: &P,
-    value: &str,
-    lookup_mode: allq_wikidata::WikidataEntityLookupMode,
-) -> anyhow::Result<ProviderPageData>
-where
-    P: ExternalIdPageProvider + Sync + ?Sized,
-{
-    let cache_key = provider_page_cache_key(provider.source(), value);
-
-    if lookup_mode != allq_wikidata::WikidataEntityLookupMode::ForceFetch {
-        if let Some(cache) = client.cache_as_ref() {
-            if let Some(entry) = cache.get(&cache_key).await? {
-                return Ok(ProviderPageData {
-                    source: provider.source(),
-                    url: provider.page_url(value),
-                    body: entry.value().clone(),
-                });
-            }
-        }
-    }
-
-    if lookup_mode == allq_wikidata::WikidataEntityLookupMode::CacheOnly {
-        anyhow::bail!(
-            "provider page {}:{value} was not found in the local cache",
-            provider.source(),
-        );
-    }
-
-    let page_data = provider.fetch_page_data(provider_http_client, value).await?;
-
-    if let Some(cache) = client.cache_as_ref() {
-        cache.insert(cache_key, page_data.body.clone());
-    }
-
-    Ok(page_data)
-}
-
-fn provider_page_cache_key(source: &str, value: &str) -> String {
-    format!("external_page:{source}:{value}")
+    Ok(result.into_json_value())
 }
 
 fn serde_json_to_nu_value(

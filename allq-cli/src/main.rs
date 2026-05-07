@@ -108,6 +108,10 @@ enum Command {
         #[arg(long)]
         direct_only: bool,
 
+        /// Add computed externalLinks metadata to hydrated JSON entity output
+        #[arg(long)]
+        external_links: bool,
+
         /// Add Wikidata property-name annotations to hydrated JSON entity output
         #[arg(long)]
         annotate_properties: bool,
@@ -238,6 +242,7 @@ async fn try_main() -> anyhow::Result<()> {
             cache_only,
             force_fetch,
             direct_only,
+            external_links,
             annotate_properties,
             json,
             pretty,
@@ -254,6 +259,7 @@ async fn try_main() -> anyhow::Result<()> {
                 direct_only,
                 debug_query,
                 annotate_properties,
+                enrich_external_links: external_links,
             })
                 .await?;
 
