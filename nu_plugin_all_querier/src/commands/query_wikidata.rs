@@ -29,7 +29,7 @@ impl SimplePluginCommand for QueryWikidata {
                     .desc("Curated Wikidata item type, e.g. character")
                     .completion(
                         Completion::new_list(
-                            allq_wikidata::CURATED_WIKIDATA_ITEM_TYPE_LABELS
+                            allq_wikidata::CURATED_WIKIDATA_ITEM_TYPE_KEYS
                         )
                     )
             )
