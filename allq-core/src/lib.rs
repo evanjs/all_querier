@@ -1,5 +1,9 @@
+pub mod dispatcher;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+pub use dispatcher::SearchDispatcher;
 
 /// Options that control search behavior (e.g. pagination, language).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
