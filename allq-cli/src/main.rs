@@ -5,11 +5,14 @@ use clap::{
     Parser,
     Subcommand,
 };
+use allq_core::{SearchDispatcher, SearchOptions, SearchResult};
+use allq_musicbrainz::MusicBrainzSearchProvider;
 use allq_query::{
     WikidataQueryOptions,
     WikidataQueryResult,
     query_wikidata,
 };
+use allq_wikidata::WikidataSearchProvider;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -124,6 +127,37 @@ enum Command {
         #[arg(long, conflicts_with = "json")]
         pretty: bool,
     },
+    /// Search across multiple providers (MusicBrainz, Wikidata) for items by type
+    Search {
+        /// Free-text search query, e.g. 'OK Computer'
+        #[arg()]
+        query: String,
+
+        /// Item type to search for (e.g. album, artist, song, character, video-game)
+        #[arg(short = 't', long = "type")]
+        item_type: Option<String>,
+
+        /// Restrict search to a single provider (e.g. musicbrainz, wikidata)
+        #[arg(short = 'p', long = "provider")]
+        provider: Option<String>,
+
+        /// Maximum number of results per provider
+        #[arg(short = 'n', long)]
+        limit: Option<u32>,
+
+        /// Output compact JSON for shell consumers such as nushell
+        #[arg(long)]
+        json: bool,
+
+        /// Pretty-print JSON
+        #[arg(long, conflicts_with = "json")]
+        pretty: bool,
+
+        /// Enable verbose diagnostic logging to stderr
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
     /// Print normalized Wikidata external IDs for one entity
     EntityIds {
         #[arg(short, long)]
@@ -143,6 +177,7 @@ impl Cli {
     fn debug_logging_enabled(&self) -> bool {
         match &self.command {
             Command::SearchItem { debug_query, .. } => *debug_query,
+            Command::Search { verbose, .. } => *verbose,
             _ => false,
         }
     }
@@ -287,6 +322,41 @@ async fn try_main() -> anyhow::Result<()> {
                 }
             }
         },
+        Command::Search {
+            query,
+            item_type,
+            provider,
+            limit,
+            json,
+            pretty,
+            verbose: _,
+        } => {
+            let results = run_search(
+                &query,
+                item_type.as_deref(),
+                provider.as_deref(),
+                limit,
+            )
+            .await?;
+
+            if json {
+                println!("{}", serde_json::to_string(&results)?);
+            } else if pretty {
+                println!("{}", serde_json::to_string_pretty(&results)?);
+            } else {
+                println!("provider\tid\tlabel\tdescription\titem_type");
+                for r in &results {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        clean_tsv_field(r.provider),
+                        clean_tsv_field(&r.id),
+                        clean_tsv_field(&r.label),
+                        clean_tsv_field(r.description.as_deref().unwrap_or("")),
+                        clean_tsv_field(r.item_type.as_deref().unwrap_or(""))
+                    );
+                }
+            }
+        }
         Command::EntityIds { qid, cache_only, force_fetch, json, pretty } => {
             let mode = if cache_only { allq_wikidata::WikidataEntityLookupMode::CacheOnly } else if force_fetch { allq_wikidata::WikidataEntityLookupMode::ForceFetch } else { allq_wikidata::WikidataEntityLookupMode::NetworkFallback };
             let client = if cache_only { allq_wikidata::WikidataClient::new_local_only().await? } else { allq_wikidata::WikidataClient::new().await? };
@@ -302,6 +372,58 @@ async fn try_main() -> anyhow::Result<()> {
 
 fn normalize_link_key(link: &str) -> String {
     link.trim().to_ascii_lowercase()
+}
+
+fn user_agent_email() -> String {
+    let author = env!("CARGO_PKG_AUTHORS")
+        .split(':')
+        .next()
+        .unwrap_or(env!("CARGO_PKG_AUTHORS"));
+    let email = author
+        .split_once('<')
+        .and_then(|(_, rest)| rest.split_once('>'))
+        .map(|(email, _)| email.trim())
+        .unwrap_or(author.trim());
+    format!(
+        "{}/{} ({})",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        email,
+    )
+}
+
+async fn run_search(
+    query: &str,
+    item_type: Option<&str>,
+    provider_filter: Option<&str>,
+    limit: Option<u32>,
+) -> anyhow::Result<Vec<SearchResult>> {
+    let mut dispatcher = SearchDispatcher::new();
+
+    let should_add = |name: &str| provider_filter.map_or(true, |f| f == name);
+
+    if should_add("musicbrainz") {
+        dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new(&user_agent_email())));
+    }
+
+    if should_add("wikidata") {
+        let client = allq_wikidata::WikidataClient::new().await?;
+        dispatcher.add_provider(Box::new(WikidataSearchProvider::new(client)));
+    }
+
+    if dispatcher.provider_names().is_empty() {
+        anyhow::bail!(
+            "no providers match filter {:?}. Available: musicbrainz, wikidata",
+            provider_filter
+        );
+    }
+
+    let options = SearchOptions {
+        limit,
+        language: Some("en".to_string()),
+    };
+
+    dispatcher.search(query, item_type, &options).await
 }
 
 fn init_logging(debug_logging: bool) -> anyhow::Result<()> {
