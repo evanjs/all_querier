@@ -1,12 +1,16 @@
 [workspace]
 members = [
     "allq-cli",
+    "allq-core",
     "allq-providers",
     "allq-query",
     "allq-wikidata",
-    "nu_plugin_all_querier",
+    "nu_plugin_all_querier"
 ]
 resolver = "3"
+
+[workspace.dependencies.allq-core]
+path = "./allq-core"
 
 [workspace.dependencies.allq-providers]
 path = "./allq-providers"

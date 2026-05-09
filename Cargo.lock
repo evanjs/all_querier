@@ -66,6 +66,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "allq-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "allq-providers"
 version = "0.1.0"
 dependencies = [
