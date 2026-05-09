@@ -3,6 +3,8 @@ name = "allq-musicbrainz"
 version = "0.1.0"
 edition = "2024"
 
+authors = ["Evan Stoll <evanjsx@gmail.com>"]
+
 [dependencies]
 allq-core = { path = "../allq-core" }
 musicbrainz_rs = { version = "0.13", features = ["async", "rate_limit"] }

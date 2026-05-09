@@ -2723,6 +2723,8 @@ dependencies = [
 name = "nu_plugin_all_querier"
 version = "0.1.0+0.112.2"
 dependencies = [
+ "allq-core",
+ "allq-musicbrainz",
  "allq-providers",
  "allq-query",
  "allq-wikidata",

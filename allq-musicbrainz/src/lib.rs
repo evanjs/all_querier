@@ -7,7 +7,7 @@ use musicbrainz_rs::entity::recording::Recording;
 use musicbrainz_rs::prelude::*;
 use tracing::debug;
 
-const SUPPORTED_TYPES: &[&str] = &["artist", "album", "song"];
+pub const SUPPORTED_TYPES: &[&str] = &["artist", "album", "song"];
 
 /// A `SearchProvider` backed by the MusicBrainz API.
 pub struct MusicBrainzSearchProvider {

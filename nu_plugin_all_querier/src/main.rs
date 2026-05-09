@@ -6,6 +6,63 @@ pub use commands::*;
 
 pub struct AllQuerierPlugin;
 
+// TODO: consider moving these to something more structured
+//  like an enum with variants, struct with impl, etc.
+#[allow(unused)]
+fn get_author_info() -> (&'static str, &'static str) {
+    let author = env!("CARGO_PKG_AUTHORS")
+        .split(':')
+        .next()
+        .unwrap_or(env!("CARGO_PKG_AUTHORS"));
+
+    let (author_name, author_email) = author
+        .split_once('<')
+        .and_then(|(name, rest)| {
+            rest.split_once('>')
+                .map(|(email, _)| (name.trim(), email.trim()))
+        })
+        .unwrap_or((author.trim(), author.trim()));
+
+    (author_name, author_email)
+}
+
+#[allow(unused)]
+fn user_agent_name() -> String {
+    let user_agent = format!(
+        "{}/{} ({})",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        get_author_info().0,
+    );
+
+    user_agent.to_string()
+}
+
+#[allow(unused)]
+fn user_agent_email() -> String {
+    let user_agent = format!(
+        "{}/{} ({})",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        get_author_info().1,
+    );
+
+    user_agent.to_string()
+}
+
+#[allow(unused)]
+fn user_agent_name_email() -> String {
+    let user_agent = format!(
+        "{}/{} ( {} <{}> )",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        get_author_info().0,
+        get_author_info().1,
+    );
+
+    user_agent.to_string()
+}
+
 pub fn init_logging(verbose: bool) -> anyhow::Result<()> {
     let env_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
         EnvFilter::try_new(rust_log)?
@@ -36,6 +93,7 @@ impl Plugin for AllQuerierPlugin {
         vec![
             // Commands should be added here
             Box::new(QueryWikidata),
+            Box::new(Search),
         ]
     }
 }
