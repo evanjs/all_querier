@@ -5,6 +5,7 @@ mod listproperties;
 mod properties;
 mod itemtypes;
 mod externallinks;
+mod search_provider;
 
 pub use cache::{
     WikidataCache, create_wikidata_cache,
@@ -31,6 +32,7 @@ pub use itemtypes::{
     search_items_by_instance_of, search_items_by_instance_of_with_options,
     wikidata_item_type_by_key, wikidata_item_type_by_key_or_label,
 };
+pub use search_provider::WikidataSearchProvider;
 pub use externallinks::{
     ExternalId,
     add_external_links_to_entities,

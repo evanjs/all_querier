@@ -102,7 +102,9 @@ dependencies = [
 name = "allq-wikidata"
 version = "0.1.0"
 dependencies = [
+ "allq-core",
  "anyhow",
+ "async-trait",
  "dirs",
  "foyer",
  "mediawiki",
