@@ -158,6 +158,17 @@ enum Command {
         verbose: bool,
     },
 
+    /// List supported external provider links (e.g. pcgw, waifu)
+    ListProviders {
+        /// Output compact JSON for shell consumers such as nushell
+        #[arg(long)]
+        json: bool,
+
+        /// Pretty-print JSON
+        #[arg(long, conflicts_with = "json")]
+        pretty: bool,
+    },
+
     /// Print normalized Wikidata external IDs for one entity
     EntityIds {
         #[arg(short, long)]
@@ -353,6 +364,28 @@ async fn try_main() -> anyhow::Result<()> {
                         clean_tsv_field(&r.label),
                         clean_tsv_field(r.description.as_deref().unwrap_or("")),
                         clean_tsv_field(r.item_type.as_deref().unwrap_or(""))
+                    );
+                }
+            }
+        }
+        Command::ListProviders { json, pretty } => {
+            let links = allq_providers::supported_provider_links();
+
+            if json {
+                println!("{}", serde_json::to_string(links)?);
+            } else if pretty {
+                println!("{}", serde_json::to_string_pretty(links)?);
+            } else {
+                println!("primaryAlias\tsource\tpropertyId\tsupportedItemTypes\tdescription");
+
+                for link in links {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        clean_tsv_field(link.primary_alias),
+                        clean_tsv_field(link.source),
+                        clean_tsv_field(link.property_id),
+                        clean_tsv_field(&link.supported_item_types.join(", ")),
+                        clean_tsv_field(link.description),
                     );
                 }
             }

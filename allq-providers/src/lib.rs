@@ -1,14 +1,27 @@
 use anyhow::Context;
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::Value;
 
 pub mod mywaifulist;
+pub mod pcgw;
 
-pub const APP_USER_AGENT: &str = concat!(
-    env!("CARGO_PKG_NAME"),
-    "/",
-    env!("CARGO_PKG_VERSION"),
-);
+pub fn app_user_agent() -> String {
+    let authors = env!("CARGO_PKG_AUTHORS");
+    let author = authors.split(':').next().unwrap_or(authors);
+    let email = author
+        .split_once('<')
+        .and_then(|(_, rest)| rest.split_once('>'))
+        .map(|(email, _)| email.trim())
+        .unwrap_or(author.trim());
+    format!(
+        "{}/{} ({}) reqwest/{}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        email,
+        env!("REQWEST_VERSION"),
+    )
+}
 
 #[derive(Debug, Clone)]
 pub struct ProviderHttpClient {
@@ -17,7 +30,7 @@ pub struct ProviderHttpClient {
 
 impl ProviderHttpClient {
     pub fn new() -> anyhow::Result<Self> {
-        Self::with_user_agent(APP_USER_AGENT)
+        Self::with_user_agent(&app_user_agent())
     }
 
     pub fn with_user_agent(user_agent: &str) -> anyhow::Result<Self> {
@@ -91,7 +104,7 @@ impl ProviderLinkRoute {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct SupportedProviderLink {
     pub primary_alias: &'static str,
     pub aliases: &'static [&'static str],
@@ -148,6 +161,14 @@ supported_provider_links! {
         supported_item_types: ["character"],
         description: "Fetch MyWaifuList character page data",
     },
+    {
+        primary_alias: "pcgw",
+        aliases: pcgw::LINK_ALIASES,
+        source: "pcgw",
+        property_id: "P6337",
+        supported_item_types: ["video-game"],
+        description: "Fetch PCGamingWiki game page data",
+    },
 }
 
 pub fn supported_provider_links() -> &'static [SupportedProviderLink] {
@@ -176,6 +197,10 @@ pub fn resolve_provider_link(link: &str) -> anyhow::Result<ProviderLinkRoute> {
     let normalized_link = normalize_link_key(link);
 
     if let Some(route) = mywaifulist::resolve_link_route(&normalized_link) {
+        return Ok(route);
+    }
+
+    if let Some(route) = pcgw::resolve_link_route(&normalized_link) {
         return Ok(route);
     }
 

@@ -92,6 +92,7 @@ impl Plugin for AllQuerierPlugin {
     fn commands(&self) -> Vec<Box<dyn PluginCommand<Plugin = Self>>> {
         vec![
             // Commands should be added here
+            Box::new(ListProviders),
             Box::new(QueryWikidata),
             Box::new(Search),
         ]
