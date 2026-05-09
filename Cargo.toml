@@ -2,6 +2,7 @@
 members = [
     "allq-cli",
     "allq-core",
+    "allq-musicbrainz",
     "allq-providers",
     "allq-query",
     "allq-wikidata",
@@ -17,6 +18,9 @@ path = "./allq-providers"
 
 [workspace.dependencies.allq-query]
 path = "./allq-query"
+
+[workspace.dependencies.allq-musicbrainz]
+path = "./allq-musicbrainz"
 
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"
