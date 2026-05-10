@@ -1,18 +1,30 @@
 [workspace]
 members = [
     "allq-cli",
+    "allq-core",
+    "allq-musicbrainz",
     "allq-providers",
+    "allq-pcgw",
     "allq-query",
     "allq-wikidata",
-    "nu_plugin_all_querier",
+    "nu_plugin_all_querier"
 ]
 resolver = "3"
+
+[workspace.dependencies.allq-core]
+path = "./allq-core"
+
+[workspace.dependencies.allq-pcgw]
+path = "./allq-pcgw"
 
 [workspace.dependencies.allq-providers]
 path = "./allq-providers"
 
 [workspace.dependencies.allq-query]
 path = "./allq-query"
+
+[workspace.dependencies.allq-musicbrainz]
+path = "./allq-musicbrainz"
 
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"

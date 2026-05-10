@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+allq-core = { path = "../allq-core" }
 mediawiki = "0.5.1"
 tokio = { workspace = true }
 anyhow = "1.0.102"
+async-trait = "0.1"
 serde_json = "1.0.149"
 foyer = { version = "0.22.3", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
