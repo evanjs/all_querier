@@ -111,6 +111,7 @@ dependencies = [
 name = "allq-providers"
 version = "0.1.0"
 dependencies = [
+ "allq-pcgw",
  "anyhow",
  "async-trait",
  "reqwest 0.12.28",

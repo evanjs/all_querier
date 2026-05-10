@@ -7,6 +7,33 @@ use tracing::debug;
 
 pub const SUPPORTED_TYPES: &[&str] = &["video-game"];
 
+/// Returns the canonical PCGW wiki page URL for a given page title/slug.
+pub fn page_url(title: &str) -> String {
+    format!("https://www.pcgamingwiki.com/wiki/{title}")
+}
+
+/// Returns the MediaWiki parse API URL for a given page title/slug.
+pub fn parse_api_url(title: &str) -> String {
+    format!(
+        "https://www.pcgamingwiki.com/w/api.php\
+         ?action=parse&redirects=1&page={}&format=json",
+        urlencoding::encode(title),
+    )
+}
+
+/// Extracts the `parse` object from a raw MediaWiki parse API JSON response body.
+/// Returns an error if the response contains an API-level error or is missing the `parse` field.
+pub fn parse_page_response(body: &str) -> anyhow::Result<Value> {
+    let root: Value = serde_json::from_str(body)
+        .context("failed to parse PCGW API response as JSON")?;
+    if let Some(err) = root.get("error") {
+        anyhow::bail!("PCGW API error: {err}");
+    }
+    root.get("parse")
+        .cloned()
+        .context("PCGW API response missing 'parse' field")
+}
+
 /// Rate limit: 20 requests/minute → 3 seconds between requests.
 const RATE_LIMIT_DELAY: Duration = Duration::from_millis(3000);
 
@@ -26,15 +53,11 @@ impl PcgwSearchProvider {
 
     /// Fetch full page data via the `parse` action, following redirects.
     async fn parse_page(&self, title: &str) -> anyhow::Result<Value> {
-        let url = format!(
-            "https://www.pcgamingwiki.com/w/api.php\
-             ?action=parse&redirects=1&page={}&format=json",
-            urlencoding::encode(title),
-        );
+        let url = parse_api_url(title);
 
         debug!(%url, "parsing PCGW page");
 
-        let body: Value = self
+        let body = self
             .client
             .get(&url)
             .send()
@@ -42,11 +65,11 @@ impl PcgwSearchProvider {
             .context("PCGW parse request failed")?
             .error_for_status()
             .context("PCGW parse returned error status")?
-            .json()
+            .text()
             .await
-            .context("failed to parse PCGW parse response")?;
+            .context("failed to read PCGW parse response body")?;
 
-        Ok(body)
+        parse_page_response(&body)
     }
 }
 
@@ -118,6 +141,7 @@ impl SearchProvider for PcgwSearchProvider {
             tokio::time::sleep(RATE_LIMIT_DELAY).await;
 
             let parse_data = match self.parse_page(&title).await {
+                // parse_page already returns the inner `parse` object
                 Ok(v) => v,
                 Err(e) => {
                     debug!(error = %e, title, "PCGW parse failed, falling back to search entry");
@@ -126,14 +150,15 @@ impl SearchProvider for PcgwSearchProvider {
             };
 
             // Prefer the resolved title/pageid from the parse response.
+            // parse_data is already the inner `parse` object, so use direct keys.
             let resolved_title = parse_data
-                .pointer("/parse/title")
+                .get("title")
                 .and_then(Value::as_str)
                 .unwrap_or(&title)
                 .to_string();
 
             let resolved_id = parse_data
-                .pointer("/parse/pageid")
+                .get("pageid")
                 .and_then(Value::as_u64)
                 .unwrap_or(pageid)
                 .to_string();

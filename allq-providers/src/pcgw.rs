@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use tracing::debug;
 use serde_json::Value;
-use anyhow::Context;
 use crate::{
     ExternalIdPageProvider,
     ProviderHttpClient,
@@ -41,7 +40,7 @@ impl ExternalIdPageProvider for PcgwProvider {
 
     /// Returns the canonical PCGW wiki page URL for the given page title/slug.
     fn page_url(&self, value: &str) -> String {
-        format!("https://www.pcgamingwiki.com/wiki/{value}")
+        allq_pcgw::page_url(value)
     }
 
     async fn fetch_page_data(
@@ -50,9 +49,7 @@ impl ExternalIdPageProvider for PcgwProvider {
         value: &str,
     ) -> anyhow::Result<ProviderPageData> {
         let url = self.page_url(value);
-        let api_url = format!(
-            "https://www.pcgamingwiki.com/w/api.php?action=parse&redirects=1&page={value}&format=json",
-        );
+        let api_url = allq_pcgw::parse_api_url(value);
 
         debug!(
             source = self.source(),
@@ -74,15 +71,6 @@ impl ExternalIdPageProvider for PcgwProvider {
     }
 
     fn parse_page_data(&self, page_data: &ProviderPageData) -> anyhow::Result<Value> {
-        let root: Value = serde_json::from_str(&page_data.body)
-            .context("failed to parse PCGW API response as JSON")?;
-
-        if let Some(err) = root.get("error") {
-            anyhow::bail!("PCGW API error: {err}");
-        }
-
-        root.get("parse")
-            .cloned()
-            .context("PCGW API response missing 'parse' field")
+        allq_pcgw::parse_page_response(&page_data.body)
     }
 }
