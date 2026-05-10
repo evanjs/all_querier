@@ -7,6 +7,7 @@ use clap::{
 };
 use allq_core::{SearchDispatcher, SearchOptions, SearchResult};
 use allq_query::{
+    FetchArgs,
     WikidataQueryOptions,
     WikidataQueryResult,
     query_wikidata,
@@ -31,11 +32,8 @@ enum Command {
         #[arg(short, long)]
         qid: String,
 
-        #[arg(long, help = "Only read from the local Wikidata cache; do not call the Wikidata API")]
-        cache_only: bool,
-
-        #[arg(long, conflicts_with = "cache_only", help = "Ignore cached entity data and fetch from Wikidata")]
-        force_fetch: bool,
+        #[command(flatten)]
+        fetch: FetchArgs,
     },
 
     /// Fetch a machine-readable JSON version of Wikidata's property list
@@ -100,17 +98,8 @@ enum Command {
         #[arg(long)]
         debug_query: bool,
 
-        /// Only read from the local Wikidata cache; do not call the Wikidata API
-        #[arg(long, conflicts_with = "force_fetch")]
-        cache_only: bool,
-
-        /// Ignore cached search results and fetch from Wikidata
-        #[arg(long, conflicts_with = "cache_only")]
-        force_fetch: bool,
-
-        /// Only match direct P31 values; do not include subclasses via P279
-        #[arg(long)]
-        direct_only: bool,
+        #[command(flatten)]
+        fetch: FetchArgs,
 
         /// Add computed externalLinks metadata to hydrated JSON entity output
         #[arg(long)]
@@ -174,10 +163,8 @@ enum Command {
     EntityIds {
         #[arg(short, long)]
         qid: String,
-        #[arg(long)]
-        cache_only: bool,
-        #[arg(long, conflicts_with = "cache_only")]
-        force_fetch: bool,
+        #[command(flatten)]
+        fetch: FetchArgs,
         #[arg(long)]
         json: bool,
         #[arg(long, conflicts_with = "json")]
@@ -216,15 +203,11 @@ async fn try_main() -> anyhow::Result<()> {
     init_logging(cli.debug_logging_enabled())?;
 
     match cli.command {
-        Command::EntityByQid {
-            qid,
-            cache_only,
-            force_fetch,
-        } => {
+        Command::EntityByQid { qid, fetch } => {
             allq_wikidata::retrieve_entity_by_qid_with_options(
                 &qid,
-                cache_only,
-                force_fetch,
+                fetch.cache_only,
+                fetch.force_fetch,
             )
                 .await?;
         }
@@ -286,9 +269,7 @@ async fn try_main() -> anyhow::Result<()> {
             limit,
             candidate_limit,
             debug_query,
-            cache_only,
-            force_fetch,
-            direct_only,
+            fetch,
             external_links,
             annotate_properties,
             json,
@@ -301,9 +282,9 @@ async fn try_main() -> anyhow::Result<()> {
                 link: link.as_deref(),
                 limit,
                 candidate_limit,
-                cache_only,
-                force_fetch,
-                direct_only,
+                cache_only: fetch.cache_only,
+                force_fetch: fetch.force_fetch,
+                direct_only: fetch.direct_only,
                 debug_query,
                 annotate_properties,
                 enrich_external_links: external_links,
@@ -391,9 +372,9 @@ async fn try_main() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::EntityIds { qid, cache_only, force_fetch, json, pretty } => {
-            let mode = if cache_only { allq_wikidata::WikidataEntityLookupMode::CacheOnly } else if force_fetch { allq_wikidata::WikidataEntityLookupMode::ForceFetch } else { allq_wikidata::WikidataEntityLookupMode::NetworkFallback };
-            let client = if cache_only { allq_wikidata::WikidataClient::new_local_only().await? } else { allq_wikidata::WikidataClient::new().await? };
+        Command::EntityIds { qid, fetch, json, pretty } => {
+            let mode = if fetch.cache_only { allq_wikidata::WikidataEntityLookupMode::CacheOnly } else if fetch.force_fetch { allq_wikidata::WikidataEntityLookupMode::ForceFetch } else { allq_wikidata::WikidataEntityLookupMode::NetworkFallback };
+            let client = if fetch.cache_only { allq_wikidata::WikidataClient::new_local_only().await? } else { allq_wikidata::WikidataClient::new().await? };
             let ids = allq_wikidata::external_ids_by_qid(&qid, &client, mode).await?;
             if json { println!("{}", serde_json::to_string(&ids)?); }
             else if pretty { println!("{}", serde_json::to_string_pretty(&ids)?); }

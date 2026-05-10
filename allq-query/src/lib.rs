@@ -1,3 +1,8 @@
+pub mod fetch_args;
+pub use fetch_args::FetchArgs;
+#[cfg(feature = "nu")]
+pub use fetch_args::{add_fetch_flags, read_fetch_args};
+
 use std::collections::HashMap;
 use std::time::Instant;
 use allq_providers::{

@@ -128,6 +128,9 @@ dependencies = [
  "allq-providers",
  "allq-wikidata",
  "anyhow",
+ "clap",
+ "nu-plugin",
+ "nu-protocol",
  "serde_json",
  "tracing",
 ]

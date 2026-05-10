@@ -4,6 +4,7 @@ use nu_plugin::{
     SimplePluginCommand,
 };
 use nu_protocol::{Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value};
+use allq_query::{FetchArgs, add_fetch_flags, read_fetch_args};
 use crate::{
     AllQuerierPlugin,
     init_logging,
@@ -19,7 +20,7 @@ impl SimplePluginCommand for QueryWikidata {
     }
 
     fn signature(&self) -> Signature {
-        Signature::build(self.name())
+        let sig = Signature::build(self.name())
             .required(
                 "query",
                 SyntaxShape::String,
@@ -52,17 +53,8 @@ impl SimplePluginCommand for QueryWikidata {
                 SyntaxShape::Int,
                 "Maximum number of Wikidata search results to consider",
                 Some('n'),
-            )
-            .switch(
-                "cache-only",
-                "Only read from the local cache; do not call Wikidata/provider APIs",
-                None,
-            )
-            .switch(
-                "direct-only",
-                "Only match direct P31 values; do not include subclasses via P279",
-                None,
-            )
+            );
+        add_fetch_flags(sig)
             .switch(
                 "external-links",
                 "Add computed externalLinks metadata to hydrated Wikidata entities",
@@ -105,9 +97,7 @@ impl SimplePluginCommand for QueryWikidata {
             .and_then(|limit| usize::try_from(limit).ok())
             .unwrap_or(1);
 
-        let cache_only = call.has_flag("cache-only")?;
-        let force_fetch = call.has_flag("force-fetch")?;
-        let direct_only = call.has_flag("direct-only")?;
+        let fetch = read_fetch_args(call).map_err(|e| e)?;
         let external_links = call.has_flag("external-links")?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
@@ -115,7 +105,7 @@ impl SimplePluginCommand for QueryWikidata {
         init_logging(verbose)
             .map_err(|error| labeled_error(head, "Failed to initialize logging", error))?;
 
-        if cache_only && force_fetch {
+        if fetch.cache_only && fetch.force_fetch {
             return Err(LabeledError::new("Conflicting flags")
                 .with_label("--cache-only and --force-fetch cannot be used together", head));
         }
@@ -129,9 +119,7 @@ impl SimplePluginCommand for QueryWikidata {
                 &query,
                 link.as_deref(),
                 limit,
-                cache_only,
-                force_fetch,
-                direct_only,
+                fetch,
                 external_links,
                 verbose,
             ))
@@ -147,9 +135,7 @@ async fn run_query_wikidata(
     query: &str,
     link: Option<&str>,
     limit: usize,
-    cache_only: bool,
-    force_fetch: bool,
-    direct_only: bool,
+    fetch: FetchArgs,
     external_links: bool,
     verbose: bool,
 ) -> anyhow::Result<serde_json::Value> {
@@ -160,9 +146,9 @@ async fn run_query_wikidata(
         link,
         limit,
         candidate_limit: None,
-        cache_only,
-        force_fetch,
-        direct_only,
+        cache_only: fetch.cache_only,
+        force_fetch: fetch.force_fetch,
+        direct_only: fetch.direct_only,
         debug_query: verbose,
         annotate_properties: false,
         enrich_external_links: external_links,

@@ -21,7 +21,7 @@ allq-musicbrainz.workspace = true
 allq-wikidata.workspace = true
 allq-pcgw.workspace = true
 allq-providers.workspace = true
-allq-query.workspace = true
+allq-query = { workspace = true, features = ["nu"] }
 anyhow = "1.0.102"
 serde_json = "1.0.149"
 tokio.workspace = true
