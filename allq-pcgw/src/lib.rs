@@ -1,9 +1,70 @@
 use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::Context;
 use async_trait::async_trait;
-use serde_json::Value;
-use std::time::Duration;
+use serde_json::{Map, Value};
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tracing::debug;
+
+/// Cargo tables to query and the fields to request from each.
+/// Fields are the exact names as returned by `action=cargofields`.
+static CARGO_TABLES: &[(&str, &str)] = &[
+    (
+        "Infobox_game",
+        "Developers,Publishers,Engines,Released_Windows,Released_OS_X,Released_Linux,\
+         Monetization,Microtransactions,Modes,Pacing,Perspectives,Controls,Genres,Sports,\
+         Vehicles,Art_styles,Themes,Series,Steam_AppID,GOGcom_ID,Wikipedia,License",
+    ),
+    (
+        "Taxonomy",
+        "Category,Glossary",
+    ),
+    (
+        "Availability",
+        "Available_from,Uses_DRM,Steam_DRM,GOGcom_DRM,Epic_Games_Store_DRM,\
+         Microsoft_Store_DRM,Xbox_Game_Pass,EA_Play,Apple_Arcade",
+    ),
+    (
+        "Video",
+        "Widescreen_resolution,Ultrawidescreen,4K_Ultra_HD,Windowed,\
+         Borderless_fullscreen_windowed,Anisotropic_filtering,Antialiasing,Upscaling,\
+         Frame_gen,Vsync,60_FPS,120_FPS,HDR,Ray_tracing,Field_of_view,Color_blind",
+    ),
+    (
+        "Audio",
+        "Separate_volume_controls,Surround_sound,Subtitles,Closed_captions,Mute_on_focus_lost",
+    ),
+    (
+        "Input",
+        "Full_controller_support,Controller_support,Key_remapping,Controller_remapping,\
+         Mouse_acceleration,Mouse_sensitivity,Mouse_input_in_menus,\
+         Controller_hotplugging,Simultaneous_input,Steam_Input_API_support",
+    ),
+    (
+        "Multiplayer",
+        "Local,Local_players,Local_modes,LAN,LAN_players,LAN_modes,\
+         Online,Online_players,Online_modes,Asynchronous,Crossplay,Crossplay_platforms",
+    ),
+    (
+        "Cloud",
+        "Steam,GOG_Galaxy,Epic_Games_Launcher,Xbox",
+    ),
+    (
+        "API",
+        "Direct3D_versions,Vulkan_versions,OpenGL_versions,Metal_support,\
+         Windows_64bit_executable,Windows_32bit_executable,\
+         macOS_Intel_64bit_app,macOS_ARM_app,Linux_64bit_executable,Linux_ARM_app",
+    ),
+    (
+        "Engine",
+        "Developer,Website,First_release,Latest_release",
+    ),
+    (
+        "Middleware",
+        "Physics,Audio,Interface,Input,Cutscenes,Multiplayer,Anticheat",
+    ),
+];
 
 pub const SUPPORTED_TYPES: &[&str] = &["video-game"];
 
@@ -34,13 +95,16 @@ pub fn parse_page_response(body: &str) -> anyhow::Result<Value> {
         .context("PCGW API response missing 'parse' field")
 }
 
-/// Rate limit: 20 requests/minute → 3 seconds between requests.
-const RATE_LIMIT_DELAY: Duration = Duration::from_millis(3000);
+/// PCGW allows at most 20 requests per minute.
+const RATE_LIMIT_MAX_REQUESTS: usize = 20;
+const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
 /// A `SearchProvider` backed by the PCGamingWiki MediaWiki search API.
 pub struct PcgwSearchProvider {
     client: reqwest::Client,
     cache: Option<ProviderCache>,
+    /// Timestamps of recent requests, used to enforce the 20 req/min burst limit.
+    request_times: Mutex<VecDeque<Instant>>,
 }
 
 impl PcgwSearchProvider {
@@ -49,7 +113,7 @@ impl PcgwSearchProvider {
             .user_agent(user_agent)
             .build()
             .expect("failed to build PCGW HTTP client");
-        Self { client, cache: None }
+        Self { client, cache: None, request_times: Mutex::new(VecDeque::new()) }
     }
 
     /// Create a new provider with the given user-agent string and a foyer hybrid cache.
@@ -58,7 +122,7 @@ impl PcgwSearchProvider {
             .user_agent(user_agent)
             .build()
             .expect("failed to build PCGW HTTP client");
-        Self { client, cache: Some(cache) }
+        Self { client, cache: Some(cache), request_times: Mutex::new(VecDeque::new()) }
     }
 
     /// Look up a cached JSON string for `key`, respecting `fetch_mode`.
@@ -80,6 +144,93 @@ impl PcgwSearchProvider {
         }
     }
 
+    /// Enforce the 20 req/min rate limit, then perform a GET and return the parsed JSON body.
+    /// Every outbound HTTP request to PCGW must go through this method.
+    async fn rate_limited_get(&self, url: &str) -> anyhow::Result<Value> {
+        let sleep_for = {
+            let mut times = self.request_times.lock().unwrap();
+            let now = Instant::now();
+            while times.front().map_or(false, |t| now.duration_since(*t) >= RATE_LIMIT_WINDOW) {
+                times.pop_front();
+            }
+            if times.len() >= RATE_LIMIT_MAX_REQUESTS {
+                let oldest = *times.front().unwrap();
+                let elapsed = now.duration_since(oldest);
+                RATE_LIMIT_WINDOW.checked_sub(elapsed)
+            } else {
+                None
+            }
+        };
+        if let Some(delay) = sleep_for {
+            tokio::time::sleep(delay).await;
+        }
+        self.request_times.lock().unwrap().push_back(Instant::now());
+
+        self.client
+            .get(url)
+            .send()
+            .await
+            .context("PCGW request failed")?
+            .error_for_status()
+            .context("PCGW returned error status")?
+            .json::<Value>()
+            .await
+            .context("failed to parse PCGW JSON response")
+    }
+
+    /// Query all Cargo tables for `page_title` sequentially, merging results into a single object.
+    /// Returns a JSON object keyed by table name, each value being the first row's `title` object.
+    /// Results are cached under `pcgw:cargo:<title>`.
+    async fn cargo_query_page(
+        &self,
+        page_title: &str,
+        fetch_mode: FetchMode,
+    ) -> anyhow::Result<Value> {
+        let cache_key = format!("pcgw:cargo:{page_title}");
+
+        if let Some(cached) = self.cache_get(&cache_key, fetch_mode).await {
+            return serde_json::from_str(&cached)
+                .context("failed to deserialize cached PCGW cargo data");
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            return Ok(Value::Object(Map::new()));
+        }
+
+        let encoded = urlencoding::encode(page_title);
+        let mut merged = Map::new();
+
+        for (table, fields) in CARGO_TABLES {
+            let url = format!(
+                "https://www.pcgamingwiki.com/w/api.php\
+                 ?action=cargoquery&format=json&limit=5\
+                 &tables={table}&fields={fields}&where=_pageName%3D%27{encoded}%27",
+            );
+            debug!(%url, table, "querying PCGW Cargo table");
+
+            match self.rate_limited_get(&url).await {
+                Ok(body) => {
+                    // Extract the first row's `title` object from `cargoquery[0].title`
+                    let row = body
+                        .pointer("/cargoquery/0/title")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    merged.insert(table.to_string(), row);
+                }
+                Err(e) => {
+                    debug!(error = %e, table, "PCGW Cargo table query failed, skipping");
+                    merged.insert(table.to_string(), Value::Null);
+                }
+            }
+        }
+
+        let result = Value::Object(merged);
+        if let Ok(json) = serde_json::to_string(&result) {
+            self.cache_insert(cache_key, json, fetch_mode).await;
+        }
+        Ok(result)
+    }
+
     /// Fetch full page data via the `parse` action, following redirects.
     /// Checks the cache first (keyed by title), stores the result on a miss.
     async fn parse_page(&self, title: &str, fetch_mode: FetchMode) -> anyhow::Result<Value> {
@@ -97,18 +248,10 @@ impl PcgwSearchProvider {
         let url = parse_api_url(title);
         debug!(%url, "parsing PCGW page");
 
-        let body = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context("PCGW parse request failed")?
-            .error_for_status()
-            .context("PCGW parse returned error status")?
-            .text()
-            .await
-            .context("failed to read PCGW parse response body")?;
-
+        let raw: Value = self.rate_limited_get(&url).await
+            .context("PCGW parse request failed")?;
+        let body = serde_json::to_string(&raw)
+            .context("failed to re-serialize PCGW parse response")?;
         let value = parse_page_response(&body)?;
 
         if let Ok(json) = serde_json::to_string(&value) {
@@ -168,17 +311,8 @@ impl SearchProvider for PcgwSearchProvider {
 
         debug!(%url, "searching PCGW");
 
-        let body: Value = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context("PCGW search request failed")?
-            .error_for_status()
-            .context("PCGW search returned error status")?
-            .json()
-            .await
-            .context("failed to parse PCGW search response")?;
+        let body: Value = self.rate_limited_get(&url).await
+            .context("PCGW search request failed")?;
 
         let results = body
             .pointer("/query/search")
@@ -198,9 +332,7 @@ impl SearchProvider for PcgwSearchProvider {
                 None => continue,
             };
 
-            // Respect the 20 req/min rate limit before each parse call.
-            tokio::time::sleep(RATE_LIMIT_DELAY).await;
-
+            // Use parse only for title/pageid resolution (follows redirects).
             let parse_data = match self.parse_page(&title, fetch_mode).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -209,7 +341,6 @@ impl SearchProvider for PcgwSearchProvider {
                 }
             };
 
-            // Prefer the resolved title/pageid from the parse response.
             let resolved_title = parse_data
                 .get("title")
                 .and_then(Value::as_str)
@@ -222,6 +353,19 @@ impl SearchProvider for PcgwSearchProvider {
                 .unwrap_or(pageid)
                 .to_string();
 
+            // Fetch structured Cargo data sequentially (rate-limited).
+            let cargo_data = match self.cargo_query_page(&resolved_title, fetch_mode).await {
+                Ok(v) => v,
+                Err(e) => {
+                    debug!(error = %e, title = resolved_title, "PCGW Cargo query failed");
+                    Value::Object(Map::new())
+                }
+            };
+
+            let mut data = Map::new();
+            data.insert("parse".to_string(), parse_data);
+            data.insert("cargo".to_string(), cargo_data);
+
             let description = entry
                 .get("snippet")
                 .and_then(Value::as_str)
@@ -233,7 +377,7 @@ impl SearchProvider for PcgwSearchProvider {
                 label: resolved_title,
                 description,
                 item_type: Some("video-game".to_string()),
-                data: parse_data,
+                data: Value::Object(data),
             });
         }
 
