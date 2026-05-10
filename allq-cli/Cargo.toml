@@ -14,6 +14,7 @@ tracing-subscriber = { workspace = true }
 # shared dependencies for projects in the workspace
 allq-core = { workspace = true }
 allq-musicbrainz = { workspace = true }
+allq-pcgw = { workspace = true }
 allq-providers = { workspace = true }
 allq-wikidata = { workspace = true }
 allq-query = { workspace = true }

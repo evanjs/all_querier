@@ -6,12 +6,13 @@ use clap::{
     Subcommand,
 };
 use allq_core::{SearchDispatcher, SearchOptions, SearchResult};
-use allq_musicbrainz::MusicBrainzSearchProvider;
 use allq_query::{
     WikidataQueryOptions,
     WikidataQueryResult,
     query_wikidata,
 };
+use allq_musicbrainz::MusicBrainzSearchProvider;
+use allq_pcgw::PcgwSearchProvider;
 use allq_wikidata::WikidataSearchProvider;
 use tracing_subscriber::EnvFilter;
 
@@ -444,9 +445,13 @@ async fn run_search(
         dispatcher.add_provider(Box::new(WikidataSearchProvider::new(client)));
     }
 
+    if should_add("pcgw") {
+        dispatcher.add_provider(Box::new(PcgwSearchProvider::new(&user_agent_email())));
+    }
+
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
-            "no providers match filter {:?}. Available: musicbrainz, wikidata",
+            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw",
             provider_filter
         );
     }

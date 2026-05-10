@@ -19,6 +19,7 @@ nu-protocol = { version = "0.112.2", features = ["plugin"] }
 allq-core.workspace = true
 allq-musicbrainz.workspace = true
 allq-wikidata.workspace = true
+allq-pcgw.workspace = true
 allq-providers.workspace = true
 allq-query.workspace = true
 anyhow = "1.0.102"
