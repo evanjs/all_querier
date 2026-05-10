@@ -74,6 +74,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "dirs",
+ "foyer",
  "serde",
  "serde_json",
 ]
@@ -85,6 +87,7 @@ dependencies = [
  "allq-core",
  "anyhow",
  "async-trait",
+ "foyer",
  "musicbrainz_rs",
  "serde",
  "serde_json",
@@ -100,6 +103,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "async-trait",
+ "foyer",
  "reqwest 0.12.28",
  "serde_json",
  "tokio",

@@ -1,4 +1,4 @@
-use allq_core::{SearchOptions, SearchProvider, SearchResult};
+use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::Context;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -40,6 +40,7 @@ const RATE_LIMIT_DELAY: Duration = Duration::from_millis(3000);
 /// A `SearchProvider` backed by the PCGamingWiki MediaWiki search API.
 pub struct PcgwSearchProvider {
     client: reqwest::Client,
+    cache: Option<ProviderCache>,
 }
 
 impl PcgwSearchProvider {
@@ -48,13 +49,52 @@ impl PcgwSearchProvider {
             .user_agent(user_agent)
             .build()
             .expect("failed to build PCGW HTTP client");
-        Self { client }
+        Self { client, cache: None }
+    }
+
+    /// Create a new provider with the given user-agent string and a foyer hybrid cache.
+    pub fn new_with_cache(user_agent: &str, cache: ProviderCache) -> Self {
+        let client = reqwest::Client::builder()
+            .user_agent(user_agent)
+            .build()
+            .expect("failed to build PCGW HTTP client");
+        Self { client, cache: Some(cache) }
+    }
+
+    /// Look up a cached JSON string for `key`, respecting `fetch_mode`.
+    async fn cache_get(&self, key: &str, fetch_mode: FetchMode) -> Option<String> {
+        if fetch_mode == FetchMode::ForceFetch {
+            return None;
+        }
+        let cache = self.cache.as_ref()?;
+        cache.get(key).await.ok().flatten().map(|e| e.value().clone())
+    }
+
+    /// Insert `value` into the cache under `key` unless in `CacheOnly` mode.
+    async fn cache_insert(&self, key: String, value: String, fetch_mode: FetchMode) {
+        if fetch_mode == FetchMode::CacheOnly {
+            return;
+        }
+        if let Some(cache) = &self.cache {
+            cache.insert(key, value);
+        }
     }
 
     /// Fetch full page data via the `parse` action, following redirects.
-    async fn parse_page(&self, title: &str) -> anyhow::Result<Value> {
-        let url = parse_api_url(title);
+    /// Checks the cache first (keyed by title), stores the result on a miss.
+    async fn parse_page(&self, title: &str, fetch_mode: FetchMode) -> anyhow::Result<Value> {
+        let cache_key = format!("pcgw:parse:{title}");
 
+        if let Some(cached) = self.cache_get(&cache_key, fetch_mode).await {
+            return serde_json::from_str(&cached)
+                .context("failed to deserialize cached PCGW parse response");
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            anyhow::bail!("PCGW parse for '{title}' not in cache (cache-only mode)");
+        }
+
+        let url = parse_api_url(title);
         debug!(%url, "parsing PCGW page");
 
         let body = self
@@ -69,7 +109,13 @@ impl PcgwSearchProvider {
             .await
             .context("failed to read PCGW parse response body")?;
 
-        parse_page_response(&body)
+        let value = parse_page_response(&body)?;
+
+        if let Ok(json) = serde_json::to_string(&value) {
+            self.cache_insert(cache_key, json, fetch_mode).await;
+        }
+
+        Ok(value)
     }
 }
 
@@ -96,7 +142,22 @@ impl SearchProvider for PcgwSearchProvider {
             }
         }
 
+        let fetch_mode = options.fetch_mode;
         let limit = options.limit.unwrap_or(10).min(50);
+        let search_cache_key = format!("pcgw:search:{query}:{limit}");
+
+        // Try to serve the full result list from cache.
+        if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
+            let value: serde_json::Value = serde_json::from_str(&cached)
+                .context("failed to deserialize cached PCGW search results")?;
+            let results: Vec<SearchResult> = serde_json::from_value(value)
+                .context("failed to convert cached PCGW search results")?;
+            return Ok(results);
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            return Ok(Vec::new());
+        }
 
         let url = format!(
             "https://www.pcgamingwiki.com/w/api.php\
@@ -140,8 +201,7 @@ impl SearchProvider for PcgwSearchProvider {
             // Respect the 20 req/min rate limit before each parse call.
             tokio::time::sleep(RATE_LIMIT_DELAY).await;
 
-            let parse_data = match self.parse_page(&title).await {
-                // parse_page already returns the inner `parse` object
+            let parse_data = match self.parse_page(&title, fetch_mode).await {
                 Ok(v) => v,
                 Err(e) => {
                     debug!(error = %e, title, "PCGW parse failed, falling back to search entry");
@@ -150,7 +210,6 @@ impl SearchProvider for PcgwSearchProvider {
             };
 
             // Prefer the resolved title/pageid from the parse response.
-            // parse_data is already the inner `parse` object, so use direct keys.
             let resolved_title = parse_data
                 .get("title")
                 .and_then(Value::as_str)
@@ -169,13 +228,18 @@ impl SearchProvider for PcgwSearchProvider {
                 .map(|s| ammonia::clean_text(s));
 
             out.push(SearchResult {
-                provider: "pcgw",
+                provider: "pcgw".to_string(),
                 id: resolved_id,
                 label: resolved_title,
                 description,
                 item_type: Some("video-game".to_string()),
                 data: parse_data,
             });
+        }
+
+        // Cache the assembled result list.
+        if let Ok(json) = serde_json::to_string(&out) {
+            self.cache_insert(search_cache_key, json, fetch_mode).await;
         }
 
         Ok(out)

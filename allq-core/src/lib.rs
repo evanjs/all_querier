@@ -1,24 +1,40 @@
+pub mod cache;
 pub mod dispatcher;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub use cache::{ProviderCache, create_provider_cache};
 pub use dispatcher::SearchDispatcher;
 
+/// Controls how a provider resolves requests relative to its local cache.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FetchMode {
+    /// Use the cache when available; fall back to the network (default).
+    #[default]
+    NetworkFallback,
+    /// Only read from the local cache; never call the network.
+    CacheOnly,
+    /// Always fetch from the network; ignore any cached data.
+    ForceFetch,
+}
+
 /// Options that control search behavior (e.g. pagination, language).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
     /// Maximum number of results to return.
     pub limit: Option<u32>,
     /// Language code for labels/descriptions (e.g. "en").
     pub language: Option<String>,
+    /// How to resolve requests relative to the local cache.
+    pub fetch_mode: FetchMode,
 }
 
 /// A provider-agnostic search result envelope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     /// Which provider produced this result (e.g. "wikidata", "musicbrainz").
-    pub provider: &'static str,
+    pub provider: String,
     /// Provider-specific identifier (QID, MBID, MAL ID, etc.).
     pub id: String,
     /// Human-readable label.

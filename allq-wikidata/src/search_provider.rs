@@ -50,7 +50,7 @@ impl SearchProvider for WikidataSearchProvider {
         Ok(results
             .into_iter()
             .map(|r| SearchResult {
-                provider: "wikidata",
+                provider: "wikidata".to_string(),
                 id: r.id,
                 label: r.label.clone(),
                 description: r.description,

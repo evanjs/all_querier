@@ -5,7 +5,7 @@ use clap::{
     Parser,
     Subcommand,
 };
-use allq_core::{SearchDispatcher, SearchOptions, SearchResult};
+use allq_core::{FetchMode, SearchDispatcher, SearchOptions, SearchResult};
 use allq_query::{
     FetchArgs,
     WikidataQueryOptions,
@@ -134,6 +134,9 @@ enum Command {
         /// Maximum number of results per provider
         #[arg(short = 'n', long)]
         limit: Option<u32>,
+
+        #[command(flatten)]
+        fetch: FetchArgs,
 
         /// Output compact JSON for shell consumers such as nushell
         #[arg(long)]
@@ -320,15 +323,24 @@ async fn try_main() -> anyhow::Result<()> {
             item_type,
             provider,
             limit,
+            fetch,
             json,
             pretty,
             verbose: _,
         } => {
+            let fetch_mode = if fetch.cache_only {
+                FetchMode::CacheOnly
+            } else if fetch.force_fetch {
+                FetchMode::ForceFetch
+            } else {
+                FetchMode::NetworkFallback
+            };
             let results = run_search(
                 &query,
                 item_type.as_deref(),
                 provider.as_deref(),
                 limit,
+                fetch_mode,
             )
             .await?;
 
@@ -341,7 +353,7 @@ async fn try_main() -> anyhow::Result<()> {
                 for r in &results {
                     println!(
                         "{}\t{}\t{}\t{}\t{}",
-                        clean_tsv_field(r.provider),
+                        clean_tsv_field(&r.provider),
                         clean_tsv_field(&r.id),
                         clean_tsv_field(&r.label),
                         clean_tsv_field(r.description.as_deref().unwrap_or("")),
@@ -412,13 +424,15 @@ async fn run_search(
     item_type: Option<&str>,
     provider_filter: Option<&str>,
     limit: Option<u32>,
+    fetch_mode: FetchMode,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
     let should_add = |name: &str| provider_filter.map_or(true, |f| f == name);
 
     if should_add("musicbrainz") {
-        dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new(&user_agent_email())));
+        let cache = allq_core::create_provider_cache("musicbrainz").await?;
+        dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
     if should_add("wikidata") {
@@ -427,7 +441,8 @@ async fn run_search(
     }
 
     if should_add("pcgw") {
-        dispatcher.add_provider(Box::new(PcgwSearchProvider::new(&user_agent_email())));
+        let cache = allq_core::create_provider_cache("pcgw").await?;
+        dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
     if dispatcher.provider_names().is_empty() {
@@ -440,6 +455,7 @@ async fn run_search(
     let options = SearchOptions {
         limit,
         language: Some("en".to_string()),
+        fetch_mode,
     };
 
     dispatcher.search(query, item_type, &options).await

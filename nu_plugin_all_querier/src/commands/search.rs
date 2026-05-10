@@ -5,7 +5,8 @@ use nu_protocol::{
     Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value,
 };
 
-use allq_core::{SearchDispatcher, SearchOptions};
+use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
+use allq_query::{add_fetch_flags, read_fetch_args};
 use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
@@ -50,7 +51,7 @@ impl SimplePluginCommand for Search {
     }
 
     fn signature(&self) -> Signature {
-        Signature::build(self.name())
+        let sig = Signature::build(self.name())
             .required(
                 "query",
                 SyntaxShape::String,
@@ -75,7 +76,8 @@ impl SimplePluginCommand for Search {
                 SyntaxShape::Int,
                 "Maximum number of results per provider",
                 Some('n'),
-            )
+            );
+        add_fetch_flags(sig)
             .switch(
                 "verbose",
                 "Enable verbose diagnostic logging to stderr",
@@ -121,11 +123,20 @@ impl SimplePluginCommand for Search {
         let limit = call
             .get_flag::<i64>("limit")?
             .and_then(|l| u32::try_from(l).ok());
+        let fetch = read_fetch_args(call).map_err(|e| e)?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
 
         init_logging(verbose)
             .map_err(|e| labeled_error(head, "Failed to initialize logging", e))?;
+
+        let fetch_mode = if fetch.cache_only {
+            FetchMode::CacheOnly
+        } else if fetch.force_fetch {
+            FetchMode::ForceFetch
+        } else {
+            FetchMode::NetworkFallback
+        };
 
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| labeled_error(head, "Failed to create Tokio runtime", e))?;
@@ -136,6 +147,7 @@ impl SimplePluginCommand for Search {
                 item_type.as_deref(),
                 provider.as_deref(),
                 limit,
+                fetch_mode,
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
 
@@ -152,12 +164,14 @@ async fn run_search(
     item_type: Option<&str>,
     provider_filter: Option<&str>,
     limit: Option<u32>,
+    fetch_mode: FetchMode,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
     let should_add = |name: &str| provider_filter.map_or(true, |f| f == name);
     if should_add("musicbrainz") {
-        dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new(&user_agent_email())));
+        let cache = allq_core::create_provider_cache("musicbrainz").await?;
+        dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
     if should_add("wikidata") {
@@ -166,7 +180,8 @@ async fn run_search(
     }
 
     if should_add("pcgw") {
-        dispatcher.add_provider(Box::new(PcgwSearchProvider::new(&user_agent_email())));
+        let cache = allq_core::create_provider_cache("pcgw").await?;
+        dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
     if dispatcher.provider_names().is_empty() {
@@ -179,6 +194,7 @@ async fn run_search(
     let options = SearchOptions {
         limit,
         language: Some("en".to_string()),
+        fetch_mode,
     };
 
     dispatcher.search(query, item_type, &options).await
