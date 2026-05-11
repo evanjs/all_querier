@@ -121,7 +121,7 @@ impl SearchProvider for MalProvider {
 
         // When a media_type filter is active we need to over-fetch from the API
         // so that we still return `limit` results after the post-filter step.
-        // MAL's maximum page size is 100.
+        // MAL catalog search caps at 100 per page; user list endpoints support up to 1000.
         let api_limit: u32 = if options.media_type.is_some() {
             100
         } else {
@@ -167,25 +167,34 @@ impl SearchProvider for MalProvider {
                 .as_deref()
                 .unwrap_or("me");
 
-            let list_results = self.client.user_animelist()
-                .get()
-                .user_name(myanimelist::objects::Username::User(username.into()))
-                .limit(api_limit as u16)
-                .send().await?;
-            for edge in list_results.data {
-                let node = edge.node;
-                // Simple filtering since API does not support .q()
-                if !query.is_empty() && !node.title.to_lowercase().contains(&query.to_lowercase()) {
-                    continue;
+            const PAGE_SIZE: u16 = 1000;
+            let mut offset: u64 = 0;
+            loop {
+                let page = self.client.user_animelist()
+                    .get()
+                    .user_name(myanimelist::objects::Username::User(username.into()))
+                    .limit(PAGE_SIZE)
+                    .offset(offset)
+                    .send().await?;
+                let has_next = page.paging.as_ref().and_then(|p| p.next.as_ref()).is_some();
+                for edge in page.data {
+                    let node = edge.node;
+                    if !query.is_empty() && !node.title.to_lowercase().contains(&query.to_lowercase()) {
+                        continue;
+                    }
+                    results.push(SearchResult {
+                        label: node.title.clone(),
+                        id: node.id.to_string(),
+                        item_type: Some(itype.to_string()),
+                        provider: "myanimelist".to_string(),
+                        description: None,
+                        data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+                    });
                 }
-                results.push(SearchResult {
-                    label: node.title.clone(),
-                    id: node.id.to_string(),
-                    item_type: Some(itype.to_string()),
-                    provider: "myanimelist".to_string(),
-                    description: None,
-                    data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
-                });
+                if !has_next {
+                    break;
+                }
+                offset += PAGE_SIZE as u64;
             }
         }
 
@@ -214,25 +223,34 @@ impl SearchProvider for MalProvider {
                 .as_deref()
                 .unwrap_or("me");
 
-            let list_results = self.client.user_mangalist()
-                .get()
-                .user_name(myanimelist::objects::Username::User(username.into()))
-                .limit(api_limit as u16)
-                .send().await?;
-            for edge in list_results.data {
-                let node = edge.node;
-                // Simple filtering since API does not support .q()
-                if !query.is_empty() && !node.title.to_lowercase().contains(&query.to_lowercase()) {
-                    continue;
+            const PAGE_SIZE: u16 = 1000;
+            let mut offset: u64 = 0;
+            loop {
+                let page = self.client.user_mangalist()
+                    .get()
+                    .user_name(myanimelist::objects::Username::User(username.into()))
+                    .limit(PAGE_SIZE)
+                    .offset(offset)
+                    .send().await?;
+                let has_next = page.paging.as_ref().and_then(|p| p.next.as_ref()).is_some();
+                for edge in page.data {
+                    let node = edge.node;
+                    if !query.is_empty() && !node.title.to_lowercase().contains(&query.to_lowercase()) {
+                        continue;
+                    }
+                    results.push(SearchResult {
+                        label: node.title.clone(),
+                        id: node.id.to_string(),
+                        item_type: Some(itype.to_string()),
+                        provider: "myanimelist".to_string(),
+                        description: None,
+                        data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+                    });
                 }
-                results.push(SearchResult {
-                    label: node.title.clone(),
-                    id: node.id.to_string(),
-                    item_type: Some(itype.to_string()),
-                    provider: "myanimelist".to_string(),
-                    description: None,
-                    data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
-                });
+                if !has_next {
+                    break;
+                }
+                offset += PAGE_SIZE as u64;
             }
         }
 
