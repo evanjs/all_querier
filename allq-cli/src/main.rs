@@ -119,9 +119,9 @@ enum Command {
     },
     /// Search across multiple providers (MusicBrainz, Wikidata) for items by type
     Search {
-        /// Free-text search query, e.g. 'OK Computer'
+        /// Free-text search query, e.g. 'OK Computer'. Optional for `animelist`/`mangalist`.
         #[arg()]
-        query: String,
+        query: Option<String>,
 
         /// Item type to search for (e.g. album, artist, song, character, video-game)
         #[arg(short = 't', long = "type")]
@@ -149,6 +149,10 @@ enum Command {
         /// Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)
         #[arg(short = 'm', long = "media-type")]
         media_type: Option<String>,
+
+        /// Use a specific MyAnimeList username for `animelist`/`mangalist` searches
+        #[arg(long = "mal-username")]
+        mal_username: Option<String>,
 
         /// Enable verbose diagnostic logging to stderr
         #[arg(short, long)]
@@ -333,6 +337,7 @@ async fn try_main() -> anyhow::Result<()> {
             json,
             pretty,
             media_type,
+            mal_username,
             verbose: _,
         } => {
             let fetch_mode = if fetch.cache_only {
@@ -342,6 +347,18 @@ async fn try_main() -> anyhow::Result<()> {
             } else {
                 FetchMode::NetworkFallback
             };
+            let query = match (query, item_type.as_deref()) {
+                (Some(query), _) => query,
+                (None, Some("animelist" | "mangalist")) => String::new(),
+                (None, Some(item_type)) => anyhow::bail!(
+                    "search query is required unless --type is animelist or mangalist (got {item_type})"
+                ),
+                (None, None) => {
+                    anyhow::bail!(
+                        "search query is required unless --type is animelist or mangalist"
+                    )
+                }
+            };
             let results = run_search(
                 &query,
                 item_type.as_deref(),
@@ -349,6 +366,7 @@ async fn try_main() -> anyhow::Result<()> {
                 limit,
                 fetch_mode,
                 media_type.as_deref(),
+                mal_username.as_deref(),
             )
             .await?;
 
@@ -434,6 +452,7 @@ async fn run_search(
     limit: Option<u32>,
     fetch_mode: FetchMode,
     media_type: Option<&str>,
+    mal_username: Option<&str>,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -478,6 +497,7 @@ async fn run_search(
         language: Some("en".to_string()),
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
+        mal_username: mal_username.map(|s| s.to_string()),
     };
 
     dispatcher.search(query, item_type, &options).await

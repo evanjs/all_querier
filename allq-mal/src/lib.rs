@@ -6,7 +6,7 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 
-pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga"];
+pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "animelist", "mangalist"];
 
 /// All valid MAL media sub-type strings (anime + manga variants).
 pub const MAL_MEDIA_TYPES: &[&str] = &[
@@ -30,6 +30,8 @@ pub fn parse_page_response(body: &str) -> Result<serde_json::Value> {
 #[derive(Deserialize)]
 struct MalConfig {
     mal_client_id: String,
+    access_token: Option<String>,
+    refresh_token: Option<String>,
 }
 
 pub fn get_client_id() -> Result<String> {
@@ -49,20 +51,39 @@ pub fn get_client_id() -> Result<String> {
     anyhow::bail!("Please set MAL_CLIENT_ID in environment or in {:?}", path)
 }
 
+pub fn get_config() -> Result<MalConfig> {
+    if let Ok(id) = env::var("MAL_CLIENT_ID") {
+        return Ok(MalConfig {
+            mal_client_id: id,
+            access_token: None,
+            refresh_token: None,
+        });
+    }
+
+    let path = all_querier_data_dir().join("credentials.json");
+    if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        let config: MalConfig = serde_json::from_str(&content)?;
+        return Ok(config);
+    }
+
+    anyhow::bail!("Please set MAL_CLIENT_ID in environment or in {:?}", path)
+}
+
 pub struct MalProvider {
     client: MalClient,
 }
 
 impl MalProvider {
     pub fn new() -> Result<Self> {
-        let client_id_str = get_client_id()?;
-        
-        let client_id = ClientId::new(client_id_str);
-        
-        // Build the client without real user tokens, only relying on the client id
-        // The myanimelist crate builder requires auth_tokens to be provided, 
-        // so we just pass default dummy tokens. The public endpoints we use 
-        // will use the client_id header instead of the bearer auth.
+        let config = get_config()?;
+        let client_id = ClientId::new(config.mal_client_id);
+
+        // TODO: implement full auth
+        // let mut auth_tokens = myanimelist::auth::AuthTokens::default();
+        // if let (Some(access), Some(refresh)) = (config.access_token, config.refresh_token) {
+        //     auth_tokens = myanimelist::auth::AuthTokens { access_token: access, refresh_token: refresh };
+        // }
         let client = MalClient::builder()
             .client_id(client_id)
             .auth_tokens(myanimelist::auth::AuthTokens::default())
@@ -80,7 +101,7 @@ impl SearchProvider for MalProvider {
     }
 
     fn supported_item_types(&self) -> &[&str] {
-        &["anime", "manga"]
+        &["anime", "manga", "animelist", "mangalist"]
     }
 
     async fn search(
@@ -91,6 +112,13 @@ impl SearchProvider for MalProvider {
     ) -> Result<Vec<SearchResult>> {
         let itype = item_type.unwrap_or("anime");
         let limit = options.limit.unwrap_or(10);
+        // Normalize list types to base types for search
+        let normalized_itype = match itype {
+            "animelist" => "anime",
+            "mangalist" => "manga",
+            _ => itype,
+        };
+
         // When a media_type filter is active we need to over-fetch from the API
         // so that we still return `limit` results after the post-filter step.
         // MAL's maximum page size is 100.
@@ -114,7 +142,7 @@ impl SearchProvider for MalProvider {
             "nsfw", "media_type", "status", "genres", "num_volumes", "num_chapters", "authors",
         ];
 
-        if itype == "anime" || itype == "all" {
+        if (normalized_itype == "anime" || normalized_itype == "all") && itype != "animelist" {
             let anime_results = self.client.anime().get().list()
                 .q(query)
                 .limit(api_limit)
@@ -125,7 +153,7 @@ impl SearchProvider for MalProvider {
                 results.push(SearchResult {
                     label: node.title.clone(),
                     id: node.id.to_string(),
-                    item_type: Some("anime".to_string()),
+                    item_type: Some(itype.to_string()),
                     provider: "myanimelist".to_string(),
                     description: node.synopsis.clone(),
                     data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
@@ -133,7 +161,35 @@ impl SearchProvider for MalProvider {
             }
         }
 
-        if itype == "manga" || itype == "all" {
+        if itype == "animelist" {
+            let username = options
+                .mal_username
+                .as_deref()
+                .unwrap_or("me");
+
+            let list_results = self.client.user_animelist()
+                .get()
+                .user_name(myanimelist::objects::Username::User(username.into()))
+                .limit(api_limit as u16)
+                .send().await?;
+            for edge in list_results.data {
+                let node = edge.node;
+                // Simple filtering since API does not support .q()
+                if !query.is_empty() && !node.title.to_lowercase().contains(&query.to_lowercase()) {
+                    continue;
+                }
+                results.push(SearchResult {
+                    label: node.title.clone(),
+                    id: node.id.to_string(),
+                    item_type: Some(itype.to_string()),
+                    provider: "myanimelist".to_string(),
+                    description: None,
+                    data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+                });
+            }
+        }
+
+        if (normalized_itype == "manga" || normalized_itype == "all") && itype != "mangalist" {
             let manga_results = self.client.manga().get().list()
                 .q(query)
                 .limit(api_limit as u16)
@@ -144,9 +200,37 @@ impl SearchProvider for MalProvider {
                 results.push(SearchResult {
                     label: node.title.clone(),
                     id: node.id.to_string(),
-                    item_type: Some("manga".to_string()),
+                    item_type: Some(itype.to_string()),
                     provider: "myanimelist".to_string(),
                     description: node.synopsis.clone(),
+                    data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+                });
+            }
+        }
+
+        if itype == "mangalist" {
+            let username = options
+                .mal_username
+                .as_deref()
+                .unwrap_or("me");
+
+            let list_results = self.client.user_mangalist()
+                .get()
+                .user_name(myanimelist::objects::Username::User(username.into()))
+                .limit(api_limit as u16)
+                .send().await?;
+            for edge in list_results.data {
+                let node = edge.node;
+                // Simple filtering since API does not support .q()
+                if !query.is_empty() && !node.title.to_lowercase().contains(&query.to_lowercase()) {
+                    continue;
+                }
+                results.push(SearchResult {
+                    label: node.title.clone(),
+                    id: node.id.to_string(),
+                    item_type: Some(itype.to_string()),
+                    provider: "myanimelist".to_string(),
+                    description: None,
                     data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
                 });
             }

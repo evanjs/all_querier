@@ -59,10 +59,10 @@ impl SimplePluginCommand for Search {
 
     fn signature(&self) -> Signature {
         let sig = Signature::build(self.name())
-            .required(
+            .optional(
                 "query",
                 SyntaxShape::String,
-                "Free-text search query, e.g. 'OK Computer'",
+                "Free-text search query, e.g. 'OK Computer'. Optional for animelist/mangalist.",
             )
             .param(
                 Flag::new("type")
@@ -90,6 +90,11 @@ impl SimplePluginCommand for Search {
                     .arg(SyntaxShape::String)
                     .desc("Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)")
                     .completion(Completion::new_list(MAL_MEDIA_TYPES)),
+            )
+            .param(
+                Flag::new("mal-username")
+                    .arg(SyntaxShape::String)
+                    .desc("Use a specific MyAnimeList username for animelist or mangalist searches"),
             );
         add_fetch_flags(sig)
             .switch(
@@ -131,14 +136,32 @@ impl SimplePluginCommand for Search {
         call: &EvaluatedCall,
         _input: &Value,
     ) -> Result<Value, LabeledError> {
-        let query: String = call.req(0)?;
         let item_type: Option<String> = call.get_flag("type")?;
+        let query = match (call.opt::<String>(0)?, item_type.as_deref()) {
+            (Some(query), _) => query,
+            (None, Some("animelist" | "mangalist")) => String::new(),
+            (None, Some(item_type)) => {
+                return Err(LabeledError::new(format!(
+                    "search query is required unless --type is animelist or mangalist (got {item_type})"
+                ))
+                .with_label("missing query", call.head));
+            }
+            (None, None) => {
+                return Err(
+                    LabeledError::new(
+                        "search query is required unless --type is animelist or mangalist",
+                    )
+                    .with_label("missing query", call.head),
+                );
+            }
+        };
         let provider: Option<String> = call.get_flag("provider")?;
         let limit = call
             .get_flag::<i64>("limit")?
             .and_then(|l| u32::try_from(l).ok());
         let fetch = read_fetch_args(call).map_err(|e| e)?;
         let media_type: Option<String> = call.get_flag("media-type")?;
+        let mal_username: Option<String> = call.get_flag("mal-username")?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
 
@@ -164,6 +187,7 @@ impl SimplePluginCommand for Search {
                 limit,
                 fetch_mode,
                 media_type.as_deref(),
+                mal_username.as_deref(),
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
 
@@ -182,6 +206,7 @@ async fn run_search(
     limit: Option<u32>,
     fetch_mode: FetchMode,
     media_type: Option<&str>,
+    mal_username: Option<&str>,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -225,6 +250,7 @@ async fn run_search(
         language: Some("en".to_string()),
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
+        mal_username: mal_username.map(|s| s.to_string()),
     };
 
     dispatcher.search(query, item_type, &options).await

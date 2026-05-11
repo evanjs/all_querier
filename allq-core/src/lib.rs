@@ -31,6 +31,8 @@ pub struct SearchOptions {
     /// Optional media sub-type filter (e.g. "tv", "ova", "movie", "manga", "novel").
     /// Currently applied post-search by the MAL provider; other providers ignore it.
     pub media_type: Option<String>,
+    /// Optional MyAnimeList username for user-list endpoints.
+    pub mal_username: Option<String>,
 }
 
 /// A provider-agnostic search result envelope.
