@@ -187,6 +187,8 @@ impl Cli {
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::dotenv();
+
     if let Err(error) = try_main().await {
         eprintln!("error: {error:#}");
 
@@ -445,9 +447,21 @@ async fn run_search(
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
+    if should_add("myanimelist") {
+        let _cache = allq_core::create_provider_cache("myanimelist").await?;
+        match allq_mal::MalProvider::new() {
+            Ok(mal_provider) => {
+                dispatcher.add_provider(Box::new(mal_provider));
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize MyAnimeList provider: {e}");
+            }
+        }
+    }
+
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
-            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw",
+            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw, myanimelist",
             provider_filter
         );
     }

@@ -4,7 +4,7 @@ pub mod dispatcher;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-pub use cache::{ProviderCache, create_provider_cache};
+pub use cache::{ProviderCache, all_querier_data_dir, create_provider_cache};
 pub use dispatcher::SearchDispatcher;
 
 /// Controls how a provider resolves requests relative to its local cache.

@@ -100,5 +100,9 @@ impl Plugin for AllQuerierPlugin {
 }
 
 fn main() {
+    let _ = dotenvy::dotenv();
+    
+    // We pass true for verbose logging only if NU_PLUGIN_ALL_QUERIER_DEBUG is set
+    // otherwise let default configuration handle it
     serve_plugin(&AllQuerierPlugin, MsgPackSerializer);
 }

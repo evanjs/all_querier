@@ -1,4 +1,5 @@
 use std::sync::OnceLock;
+use tracing::debug;
 
 use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
 use nu_protocol::{
@@ -7,6 +8,7 @@ use nu_protocol::{
 
 use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
 use allq_query::{add_fetch_flags, read_fetch_args};
+use allq_mal::SUPPORTED_TYPES as MAL_SUPPORTED_TYPES;
 use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
@@ -14,7 +16,7 @@ use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
 use crate::{AllQuerierPlugin, init_logging, user_agent_email};
 
 /// Static list of provider names supported by the `search` command.
-pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw"];
+pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist"];
 
 /// Returns the union of item types supported across all search providers,
 /// suitable for use as completion candidates for the `--type` flag.
@@ -33,6 +35,11 @@ fn search_item_type_completions() -> &'static [&'static str] {
             }
         }
         for &t in PCGW_SUPPORTED_TYPES {
+            if !types.contains(&t) {
+                types.push(t);
+            }
+        }
+        for &t in MAL_SUPPORTED_TYPES {
             if !types.contains(&t) {
                 types.push(t);
             }
@@ -184,9 +191,21 @@ async fn run_search(
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
+    if should_add("myanimelist") {
+        let _cache = allq_core::create_provider_cache("myanimelist").await?;
+        match allq_mal::MalProvider::new() {
+            Ok(mal_provider) => {
+                dispatcher.add_provider(Box::new(mal_provider));
+            }
+            Err(e) => {
+                debug!("Failed to initialize MAL provider, skipping: {}", e);
+            }
+        }
+    }
+
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
-            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw",
+            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw, myanimelist",
             provider_filter
         );
     }

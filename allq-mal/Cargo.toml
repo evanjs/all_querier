@@ -1,0 +1,12 @@
+[package]
+name = "allq-mal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+allq-core = { path = "../allq-core" }
+myanimelist = "0.2.4"
+anyhow = "1.0"
+async-trait = "0.1"
+serde_json = "1.0.149"
+serde = { version = "1.0.228", features = ["derive"] }
