@@ -81,13 +81,31 @@ impl SearchProvider for MalProvider {
         &self,
         query: &str,
         item_type: Option<&str>,
-        _options: &SearchOptions, // could use limit etc.
+        options: &SearchOptions,
     ) -> Result<Vec<SearchResult>> {
         let itype = item_type.unwrap_or("anime");
+        let limit = options.limit.unwrap_or(10);
         let mut results = Vec::new();
-        
+
+        const ANIME_FIELDS: &[&str] = &[
+            "id", "title", "main_picture", "alternative_titles", "start_date", "end_date",
+            "synopsis", "mean", "rank", "popularity", "num_list_users", "num_scoring_users",
+            "nsfw", "media_type", "status", "genres", "num_episodes", "start_season",
+            "broadcast", "source", "average_episode_duration", "rating", "studios",
+        ];
+
+        const MANGA_FIELDS: &[&str] = &[
+            "id", "title", "main_picture", "alternative_titles", "start_date", "end_date",
+            "synopsis", "mean", "rank", "popularity", "num_list_users", "num_scoring_users",
+            "nsfw", "media_type", "status", "genres", "num_volumes", "num_chapters", "authors",
+        ];
+
         if itype == "anime" || itype == "all" {
-            let anime_results = self.client.anime().get().list().q(query).limit(10).send().await?;
+            let anime_results = self.client.anime().get().list()
+                .q(query)
+                .limit(limit)
+                .fields(ANIME_FIELDS)
+                .send().await?;
             for edge in anime_results.data {
                 let node = edge.node;
                 results.push(SearchResult {
@@ -95,14 +113,18 @@ impl SearchProvider for MalProvider {
                     id: node.id.to_string(),
                     item_type: Some("anime".to_string()),
                     provider: "myanimelist".to_string(),
-                    description: None,
+                    description: node.synopsis.clone(),
                     data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
                 });
             }
         }
-        
+
         if itype == "manga" || itype == "all" {
-            let manga_results = self.client.manga().get().list().q(query).limit(10).send().await?;
+            let manga_results = self.client.manga().get().list()
+                .q(query)
+                .limit(limit as u16)
+                .fields(MANGA_FIELDS)
+                .send().await?;
             for edge in manga_results.data {
                 let node = edge.node;
                 results.push(SearchResult {
@@ -110,12 +132,12 @@ impl SearchProvider for MalProvider {
                     id: node.id.to_string(),
                     item_type: Some("manga".to_string()),
                     provider: "myanimelist".to_string(),
-                    description: None,
+                    description: node.synopsis.clone(),
                     data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
                 });
             }
         }
-        
+
         Ok(results)
     }
 }
