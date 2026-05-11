@@ -33,6 +33,8 @@ pub struct SearchOptions {
     pub media_type: Option<String>,
     /// Optional MyAnimeList username for user-list endpoints.
     pub mal_username: Option<String>,
+    /// Include NSFW results (passed to MAL `.nsfw()` parameter).
+    pub nsfw: bool,
 }
 
 /// A provider-agnostic search result envelope.

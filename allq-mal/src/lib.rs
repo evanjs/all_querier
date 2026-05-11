@@ -147,6 +147,7 @@ impl SearchProvider for MalProvider {
                 .q(query)
                 .limit(api_limit)
                 .fields(ANIME_FIELDS)
+                .nsfw(options.nsfw)
                 .send().await?;
             for edge in anime_results.data {
                 let node = edge.node;
@@ -175,6 +176,7 @@ impl SearchProvider for MalProvider {
                     .user_name(myanimelist::objects::Username::User(username.into()))
                     .limit(PAGE_SIZE)
                     .offset(offset)
+                    .nsfw(options.nsfw)
                     .send().await?;
                 let has_next = page.paging.as_ref().and_then(|p| p.next.as_ref()).is_some();
                 for edge in page.data {
@@ -203,6 +205,7 @@ impl SearchProvider for MalProvider {
                 .q(query)
                 .limit(api_limit as u16)
                 .fields(MANGA_FIELDS)
+                .nsfw(options.nsfw)
                 .send().await?;
             for edge in manga_results.data {
                 let node = edge.node;
@@ -231,6 +234,7 @@ impl SearchProvider for MalProvider {
                     .user_name(myanimelist::objects::Username::User(username.into()))
                     .limit(PAGE_SIZE)
                     .offset(offset)
+                    .nsfw(options.nsfw)
                     .send().await?;
                 let has_next = page.paging.as_ref().and_then(|p| p.next.as_ref()).is_some();
                 for edge in page.data {

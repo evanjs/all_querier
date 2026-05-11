@@ -95,6 +95,11 @@ impl SimplePluginCommand for Search {
                 Flag::new("mal-username")
                     .arg(SyntaxShape::String)
                     .desc("Use a specific MyAnimeList username for animelist or mangalist searches"),
+            )
+            .switch(
+                "nsfw",
+                "Include NSFW results in MAL searches",
+                None,
             );
         add_fetch_flags(sig)
             .switch(
@@ -162,6 +167,7 @@ impl SimplePluginCommand for Search {
         let fetch = read_fetch_args(call).map_err(|e| e)?;
         let media_type: Option<String> = call.get_flag("media-type")?;
         let mal_username: Option<String> = call.get_flag("mal-username")?;
+        let nsfw = call.has_flag("nsfw")?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
 
@@ -188,6 +194,7 @@ impl SimplePluginCommand for Search {
                 fetch_mode,
                 media_type.as_deref(),
                 mal_username.as_deref(),
+                nsfw,
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
 
@@ -207,6 +214,7 @@ async fn run_search(
     fetch_mode: FetchMode,
     media_type: Option<&str>,
     mal_username: Option<&str>,
+    nsfw: bool,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -251,6 +259,7 @@ async fn run_search(
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
         mal_username: mal_username.map(|s| s.to_string()),
+        nsfw,
     };
 
     dispatcher.search(query, item_type, &options).await

@@ -154,6 +154,10 @@ enum Command {
         #[arg(long = "mal-username")]
         mal_username: Option<String>,
 
+        /// Include NSFW results in MAL searches
+        #[arg(long)]
+        nsfw: bool,
+
         /// Enable verbose diagnostic logging to stderr
         #[arg(short, long)]
         verbose: bool,
@@ -338,6 +342,7 @@ async fn try_main() -> anyhow::Result<()> {
             pretty,
             media_type,
             mal_username,
+            nsfw,
             verbose: _,
         } => {
             let fetch_mode = if fetch.cache_only {
@@ -367,6 +372,7 @@ async fn try_main() -> anyhow::Result<()> {
                 fetch_mode,
                 media_type.as_deref(),
                 mal_username.as_deref(),
+                nsfw,
             )
             .await?;
 
@@ -453,6 +459,7 @@ async fn run_search(
     fetch_mode: FetchMode,
     media_type: Option<&str>,
     mal_username: Option<&str>,
+    nsfw: bool,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -498,6 +505,7 @@ async fn run_search(
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
         mal_username: mal_username.map(|s| s.to_string()),
+        nsfw,
     };
 
     dispatcher.search(query, item_type, &options).await
