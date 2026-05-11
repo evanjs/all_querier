@@ -8,7 +8,7 @@ use nu_protocol::{
 
 use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
 use allq_query::{add_fetch_flags, read_fetch_args};
-use allq_mal::SUPPORTED_TYPES as MAL_SUPPORTED_TYPES;
+use allq_mal::{MAL_MEDIA_TYPES, SUPPORTED_TYPES as MAL_SUPPORTED_TYPES};
 use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
@@ -83,6 +83,13 @@ impl SimplePluginCommand for Search {
                 SyntaxShape::Int,
                 "Maximum number of results per provider",
                 Some('n'),
+            )
+            .param(
+                Flag::new("media-type")
+                    .short('m')
+                    .arg(SyntaxShape::String)
+                    .desc("Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)")
+                    .completion(Completion::new_list(MAL_MEDIA_TYPES)),
             );
         add_fetch_flags(sig)
             .switch(
@@ -131,6 +138,7 @@ impl SimplePluginCommand for Search {
             .get_flag::<i64>("limit")?
             .and_then(|l| u32::try_from(l).ok());
         let fetch = read_fetch_args(call).map_err(|e| e)?;
+        let media_type: Option<String> = call.get_flag("media-type")?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
 
@@ -155,6 +163,7 @@ impl SimplePluginCommand for Search {
                 provider.as_deref(),
                 limit,
                 fetch_mode,
+                media_type.as_deref(),
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
 
@@ -172,6 +181,7 @@ async fn run_search(
     provider_filter: Option<&str>,
     limit: Option<u32>,
     fetch_mode: FetchMode,
+    media_type: Option<&str>,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -214,6 +224,7 @@ async fn run_search(
         limit,
         language: Some("en".to_string()),
         fetch_mode,
+        media_type: media_type.map(|s| s.to_string()),
     };
 
     dispatcher.search(query, item_type, &options).await

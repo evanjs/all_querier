@@ -146,6 +146,10 @@ enum Command {
         #[arg(long, conflicts_with = "json")]
         pretty: bool,
 
+        /// Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)
+        #[arg(short = 'm', long = "media-type")]
+        media_type: Option<String>,
+
         /// Enable verbose diagnostic logging to stderr
         #[arg(short, long)]
         verbose: bool,
@@ -328,6 +332,7 @@ async fn try_main() -> anyhow::Result<()> {
             fetch,
             json,
             pretty,
+            media_type,
             verbose: _,
         } => {
             let fetch_mode = if fetch.cache_only {
@@ -343,6 +348,7 @@ async fn try_main() -> anyhow::Result<()> {
                 provider.as_deref(),
                 limit,
                 fetch_mode,
+                media_type.as_deref(),
             )
             .await?;
 
@@ -427,6 +433,7 @@ async fn run_search(
     provider_filter: Option<&str>,
     limit: Option<u32>,
     fetch_mode: FetchMode,
+    media_type: Option<&str>,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -470,6 +477,7 @@ async fn run_search(
         limit,
         language: Some("en".to_string()),
         fetch_mode,
+        media_type: media_type.map(|s| s.to_string()),
     };
 
     dispatcher.search(query, item_type, &options).await

@@ -28,6 +28,9 @@ pub struct SearchOptions {
     pub language: Option<String>,
     /// How to resolve requests relative to the local cache.
     pub fetch_mode: FetchMode,
+    /// Optional media sub-type filter (e.g. "tv", "ova", "movie", "manga", "novel").
+    /// Currently applied post-search by the MAL provider; other providers ignore it.
+    pub media_type: Option<String>,
 }
 
 /// A provider-agnostic search result envelope.

@@ -8,6 +8,12 @@ use std::fs;
 
 pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga"];
 
+/// All valid MAL media sub-type strings (anime + manga variants).
+pub const MAL_MEDIA_TYPES: &[&str] = &[
+    "tv", "ova", "movie", "special", "ona", "music",
+    "manga", "novel", "one_shot", "doujinshi", "manhwa", "manhua", "oel", "pv"
+];
+
 pub fn page_url(id: &str) -> String {
     format!("https://myanimelist.net/anime/{id}")
 }
@@ -85,6 +91,14 @@ impl SearchProvider for MalProvider {
     ) -> Result<Vec<SearchResult>> {
         let itype = item_type.unwrap_or("anime");
         let limit = options.limit.unwrap_or(10);
+        // When a media_type filter is active we need to over-fetch from the API
+        // so that we still return `limit` results after the post-filter step.
+        // MAL's maximum page size is 100.
+        let api_limit: u32 = if options.media_type.is_some() {
+            100
+        } else {
+            limit.min(100)
+        };
         let mut results = Vec::new();
 
         const ANIME_FIELDS: &[&str] = &[
@@ -103,7 +117,7 @@ impl SearchProvider for MalProvider {
         if itype == "anime" || itype == "all" {
             let anime_results = self.client.anime().get().list()
                 .q(query)
-                .limit(limit)
+                .limit(api_limit)
                 .fields(ANIME_FIELDS)
                 .send().await?;
             for edge in anime_results.data {
@@ -122,7 +136,7 @@ impl SearchProvider for MalProvider {
         if itype == "manga" || itype == "all" {
             let manga_results = self.client.manga().get().list()
                 .q(query)
-                .limit(limit as u16)
+                .limit(api_limit as u16)
                 .fields(MANGA_FIELDS)
                 .send().await?;
             for edge in manga_results.data {
@@ -137,6 +151,20 @@ impl SearchProvider for MalProvider {
                 });
             }
         }
+
+        if let Some(ref mt) = options.media_type {
+            results.retain(|r| {
+                r.data
+                    .get("media_type")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case(mt))
+                    .unwrap_or(false)
+            });
+        }
+
+        // Apply the user-requested limit after filtering so the final result
+        // count is correct regardless of how many items were filtered out.
+        results.truncate(limit as usize);
 
         Ok(results)
     }

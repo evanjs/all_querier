@@ -2597,8 +2597,6 @@ dependencies = [
 [[package]]
 name = "myanimelist"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdcdaba6c78419f0889edbce8b0ec811dacc0c84e30f57fffc548a21e41d14b8"
 dependencies = [
  "chrono",
  "const_format",
