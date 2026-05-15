@@ -2,6 +2,7 @@
 members = [
     "allq-cli",
     "allq-core",
+    "allq-mal",
     "allq-musicbrainz",
     "allq-providers",
     "allq-pcgw",
@@ -23,14 +24,14 @@ path = "./allq-providers"
 [workspace.dependencies.allq-query]
 path = "./allq-query"
 
+[workspace.dependencies.allq-mal]
+path = "./allq-mal"
+
 [workspace.dependencies.allq-musicbrainz]
 path = "./allq-musicbrainz"
 
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"
-
-[workspace.dependencies.nu_plugin_all_querier]
-path = "./nu_plugin_all_querier"
 
 [workspace.dependencies.tracing]
 version = "0.1"

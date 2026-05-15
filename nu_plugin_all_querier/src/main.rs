@@ -68,7 +68,7 @@ pub fn init_logging(verbose: bool) -> anyhow::Result<()> {
         EnvFilter::try_new(rust_log)?
     } else if verbose {
         EnvFilter::try_new(
-            "warn,allq_query=debug,allq_providers=debug,allq_wikidata=debug,nu_plugin_all_querier=debug",
+            "warn,allq_query=debug,allq_providers=debug,allq_wikidata=debug,allq_core=debug,allq_mal=debug,allq_pcgw=debug,allq_musicbrainz=debug,nu_plugin_all_querier=debug"
         )?
     } else {
         EnvFilter::try_new("warn")?
@@ -100,5 +100,9 @@ impl Plugin for AllQuerierPlugin {
 }
 
 fn main() {
+    let _ = dotenvy::dotenv();
+    
+    // We pass true for verbose logging only if NU_PLUGIN_ALL_QUERIER_DEBUG is set
+    // otherwise let default configuration handle it
     serve_plugin(&AllQuerierPlugin, MsgPackSerializer);
 }

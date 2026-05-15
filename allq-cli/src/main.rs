@@ -119,9 +119,9 @@ enum Command {
     },
     /// Search across multiple providers (MusicBrainz, Wikidata) for items by type
     Search {
-        /// Free-text search query, e.g. 'OK Computer'
+        /// Free-text search query, e.g. 'OK Computer'. Optional for `animelist`/`mangalist`.
         #[arg()]
-        query: String,
+        query: Option<String>,
 
         /// Item type to search for (e.g. album, artist, song, character, video-game)
         #[arg(short = 't', long = "type")]
@@ -145,6 +145,18 @@ enum Command {
         /// Pretty-print JSON
         #[arg(long, conflicts_with = "json")]
         pretty: bool,
+
+        /// Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)
+        #[arg(short = 'm', long = "media-type")]
+        media_type: Option<String>,
+
+        /// Use a specific MyAnimeList username for `animelist`/`mangalist` searches
+        #[arg(long = "mal-username")]
+        mal_username: Option<String>,
+
+        /// Include NSFW results in MAL searches
+        #[arg(long)]
+        nsfw: bool,
 
         /// Enable verbose diagnostic logging to stderr
         #[arg(short, long)]
@@ -187,6 +199,8 @@ impl Cli {
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::dotenv();
+
     if let Err(error) = try_main().await {
         eprintln!("error: {error:#}");
 
@@ -326,6 +340,9 @@ async fn try_main() -> anyhow::Result<()> {
             fetch,
             json,
             pretty,
+            media_type,
+            mal_username,
+            nsfw,
             verbose: _,
         } => {
             let fetch_mode = if fetch.cache_only {
@@ -335,12 +352,27 @@ async fn try_main() -> anyhow::Result<()> {
             } else {
                 FetchMode::NetworkFallback
             };
+            let query = match (query, item_type.as_deref()) {
+                (Some(query), _) => query,
+                (None, Some("animelist" | "mangalist")) => String::new(),
+                (None, Some(item_type)) => anyhow::bail!(
+                    "search query is required unless --type is animelist or mangalist (got {item_type})"
+                ),
+                (None, None) => {
+                    anyhow::bail!(
+                        "search query is required unless --type is animelist or mangalist"
+                    )
+                }
+            };
             let results = run_search(
                 &query,
                 item_type.as_deref(),
                 provider.as_deref(),
                 limit,
                 fetch_mode,
+                media_type.as_deref(),
+                mal_username.as_deref(),
+                nsfw,
             )
             .await?;
 
@@ -425,6 +457,9 @@ async fn run_search(
     provider_filter: Option<&str>,
     limit: Option<u32>,
     fetch_mode: FetchMode,
+    media_type: Option<&str>,
+    mal_username: Option<&str>,
+    nsfw: bool,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -445,9 +480,21 @@ async fn run_search(
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
+    if should_add("myanimelist") {
+        let _cache = allq_core::create_provider_cache("myanimelist").await?;
+        match allq_mal::MalProvider::new() {
+            Ok(mal_provider) => {
+                dispatcher.add_provider(Box::new(mal_provider));
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize MyAnimeList provider: {e}");
+            }
+        }
+    }
+
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
-            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw",
+            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw, myanimelist",
             provider_filter
         );
     }
@@ -456,6 +503,9 @@ async fn run_search(
         limit,
         language: Some("en".to_string()),
         fetch_mode,
+        media_type: media_type.map(|s| s.to_string()),
+        mal_username: mal_username.map(|s| s.to_string()),
+        nsfw,
     };
 
     dispatcher.search(query, item_type, &options).await
@@ -466,7 +516,7 @@ fn init_logging(debug_logging: bool) -> anyhow::Result<()> {
         EnvFilter::try_new(rust_log)
             .context("invalid RUST_LOG env filter")?
     } else if debug_logging {
-        EnvFilter::try_new("warn,allq_cli=debug,allq_providers=debug,allq_wikidata=debug")
+        EnvFilter::try_new("warn,allq_cli=debug,allq_providers=debug,allq_wikidata=debug,allq_core=debug,allq_mal=debug,allq_pcgw=debug")
             .context("invalid built-in debug env filter")?
     } else {
         EnvFilter::try_new("warn")

@@ -5,6 +5,7 @@ use serde_json::Value;
 
 pub mod mywaifulist;
 pub mod pcgw;
+pub mod mal;
 
 pub fn app_user_agent() -> String {
     let authors = env!("CARGO_PKG_AUTHORS");
@@ -169,6 +170,14 @@ supported_provider_links! {
         supported_item_types: ["video-game"],
         description: "Fetch PCGamingWiki game page data",
     },
+    {
+        primary_alias: "mal",
+        aliases: mal::LINK_ALIASES,
+        source: "mal",
+        property_id: "P4086",
+        supported_item_types: ["anime", "manga"],
+        description: "Fetch MyAnimeList anime page data",
+    },
 }
 
 pub fn supported_provider_links() -> &'static [SupportedProviderLink] {
@@ -201,6 +210,10 @@ pub fn resolve_provider_link(link: &str) -> anyhow::Result<ProviderLinkRoute> {
     }
 
     if let Some(route) = pcgw::resolve_link_route(&normalized_link) {
+        return Ok(route);
+    }
+
+    if let Some(route) = mal::resolve_link_route(&normalized_link) {
         return Ok(route);
     }
 

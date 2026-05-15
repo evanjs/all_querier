@@ -9,7 +9,7 @@ const PROVIDER_CACHE_SCHEMA_VERSION: &str = "v1";
 const PROVIDER_MEMORY_CACHE_CAPACITY: usize = 32 * 1024 * 1024;
 const PROVIDER_DISK_CACHE_CAPACITY_BYTES: usize = 256 * 1024 * 1024;
 
-fn all_querier_data_dir() -> PathBuf {
+pub fn all_querier_data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from(".cache"))
         .join("all_querier")

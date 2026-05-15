@@ -1,4 +1,5 @@
 use std::sync::OnceLock;
+use tracing::debug;
 
 use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
 use nu_protocol::{
@@ -7,6 +8,7 @@ use nu_protocol::{
 
 use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
 use allq_query::{add_fetch_flags, read_fetch_args};
+use allq_mal::{MAL_MEDIA_TYPES, SUPPORTED_TYPES as MAL_SUPPORTED_TYPES};
 use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
@@ -14,7 +16,7 @@ use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
 use crate::{AllQuerierPlugin, init_logging, user_agent_email};
 
 /// Static list of provider names supported by the `search` command.
-pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw"];
+pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist"];
 
 /// Returns the union of item types supported across all search providers,
 /// suitable for use as completion candidates for the `--type` flag.
@@ -37,6 +39,11 @@ fn search_item_type_completions() -> &'static [&'static str] {
                 types.push(t);
             }
         }
+        for &t in MAL_SUPPORTED_TYPES {
+            if !types.contains(&t) {
+                types.push(t);
+            }
+        }
         types
     })
 }
@@ -52,10 +59,10 @@ impl SimplePluginCommand for Search {
 
     fn signature(&self) -> Signature {
         let sig = Signature::build(self.name())
-            .required(
+            .optional(
                 "query",
                 SyntaxShape::String,
-                "Free-text search query, e.g. 'OK Computer'",
+                "Free-text search query, e.g. 'OK Computer'. Optional for animelist/mangalist.",
             )
             .param(
                 Flag::new("type")
@@ -76,6 +83,23 @@ impl SimplePluginCommand for Search {
                 SyntaxShape::Int,
                 "Maximum number of results per provider",
                 Some('n'),
+            )
+            .param(
+                Flag::new("media-type")
+                    .short('m')
+                    .arg(SyntaxShape::String)
+                    .desc("Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)")
+                    .completion(Completion::new_list(MAL_MEDIA_TYPES)),
+            )
+            .param(
+                Flag::new("mal-username")
+                    .arg(SyntaxShape::String)
+                    .desc("Use a specific MyAnimeList username for animelist or mangalist searches"),
+            )
+            .switch(
+                "nsfw",
+                "Include NSFW results in MAL searches",
+                None,
             );
         add_fetch_flags(sig)
             .switch(
@@ -117,13 +141,33 @@ impl SimplePluginCommand for Search {
         call: &EvaluatedCall,
         _input: &Value,
     ) -> Result<Value, LabeledError> {
-        let query: String = call.req(0)?;
         let item_type: Option<String> = call.get_flag("type")?;
+        let query = match (call.opt::<String>(0)?, item_type.as_deref()) {
+            (Some(query), _) => query,
+            (None, Some("animelist" | "mangalist")) => String::new(),
+            (None, Some(item_type)) => {
+                return Err(LabeledError::new(format!(
+                    "search query is required unless --type is animelist or mangalist (got {item_type})"
+                ))
+                .with_label("missing query", call.head));
+            }
+            (None, None) => {
+                return Err(
+                    LabeledError::new(
+                        "search query is required unless --type is animelist or mangalist",
+                    )
+                    .with_label("missing query", call.head),
+                );
+            }
+        };
         let provider: Option<String> = call.get_flag("provider")?;
         let limit = call
             .get_flag::<i64>("limit")?
             .and_then(|l| u32::try_from(l).ok());
         let fetch = read_fetch_args(call).map_err(|e| e)?;
+        let media_type: Option<String> = call.get_flag("media-type")?;
+        let mal_username: Option<String> = call.get_flag("mal-username")?;
+        let nsfw = call.has_flag("nsfw")?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
 
@@ -148,6 +192,9 @@ impl SimplePluginCommand for Search {
                 provider.as_deref(),
                 limit,
                 fetch_mode,
+                media_type.as_deref(),
+                mal_username.as_deref(),
+                nsfw,
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
 
@@ -165,6 +212,9 @@ async fn run_search(
     provider_filter: Option<&str>,
     limit: Option<u32>,
     fetch_mode: FetchMode,
+    media_type: Option<&str>,
+    mal_username: Option<&str>,
+    nsfw: bool,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -184,9 +234,21 @@ async fn run_search(
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
+    if should_add("myanimelist") {
+        let _cache = allq_core::create_provider_cache("myanimelist").await?;
+        match allq_mal::MalProvider::new() {
+            Ok(mal_provider) => {
+                dispatcher.add_provider(Box::new(mal_provider));
+            }
+            Err(e) => {
+                debug!("Failed to initialize MAL provider, skipping: {}", e);
+            }
+        }
+    }
+
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
-            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw",
+            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw, myanimelist",
             provider_filter
         );
     }
@@ -195,6 +257,9 @@ async fn run_search(
         limit,
         language: Some("en".to_string()),
         fetch_mode,
+        media_type: media_type.map(|s| s.to_string()),
+        mal_username: mal_username.map(|s| s.to_string()),
+        nsfw,
     };
 
     dispatcher.search(query, item_type, &options).await

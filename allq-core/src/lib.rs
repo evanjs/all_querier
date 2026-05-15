@@ -4,7 +4,7 @@ pub mod dispatcher;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-pub use cache::{ProviderCache, create_provider_cache};
+pub use cache::{ProviderCache, all_querier_data_dir, create_provider_cache};
 pub use dispatcher::SearchDispatcher;
 
 /// Controls how a provider resolves requests relative to its local cache.
@@ -28,6 +28,13 @@ pub struct SearchOptions {
     pub language: Option<String>,
     /// How to resolve requests relative to the local cache.
     pub fetch_mode: FetchMode,
+    /// Optional media sub-type filter (e.g. "tv", "ova", "movie", "manga", "novel").
+    /// Currently applied post-search by the MAL provider; other providers ignore it.
+    pub media_type: Option<String>,
+    /// Optional MyAnimeList username for user-list endpoints.
+    pub mal_username: Option<String>,
+    /// Include NSFW results (passed to MAL `.nsfw()` parameter).
+    pub nsfw: bool,
 }
 
 /// A provider-agnostic search result envelope.

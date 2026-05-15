@@ -1,16 +1,13 @@
 [package]
-name = "allq-wikidata"
+name = "allq-mal"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 allq-core = { path = "../allq-core" }
-mediawiki = "0.5.1"
-tokio = { workspace = true }
-anyhow = "1.0.102"
+myanimelist =  { path = "C:\\Users\\evanjs\\src\\mal-api-rs" }
+anyhow = "1.0"
 async-trait = "0.1"
 serde_json = "1.0.149"
-foyer = { version = "0.22.3", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
-dirs = "6.0.0"
 tracing = { workspace = true }
