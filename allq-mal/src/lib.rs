@@ -5,6 +5,7 @@ use myanimelist::{MalClient, ClientId};
 use serde::Deserialize;
 use std::env;
 use std::fs;
+use tracing::debug;
 
 pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "animelist", "mangalist"];
 
@@ -143,11 +144,17 @@ impl SearchProvider for MalProvider {
         ];
 
         if (normalized_itype == "anime" || normalized_itype == "all") && itype != "animelist" {
-            let anime_results = self.client.anime().get().list()
+            let anime_results_request = self.client.anime().get().list()
                 .q(query)
                 .limit(api_limit)
                 .fields(ANIME_FIELDS)
-                .nsfw(options.nsfw)
+                .nsfw(options.nsfw);
+                debug!(
+                    ?query,
+                    nsfw =? options.nsfw,
+                    "Searching for anime"
+                );
+            let anime_results = anime_results_request
                 .send().await?;
             for edge in anime_results.data {
                 let node = edge.node;
@@ -171,12 +178,18 @@ impl SearchProvider for MalProvider {
             const PAGE_SIZE: u16 = 1000;
             let mut offset: u64 = 0;
             loop {
-                let page = self.client.user_animelist()
+                let page_request = self.client.user_animelist()
                     .get()
                     .user_name(myanimelist::objects::Username::User(username.into()))
                     .limit(PAGE_SIZE)
                     .offset(offset)
-                    .nsfw(options.nsfw)
+                    .nsfw(options.nsfw);
+                debug!(
+                    user =? username.clone(),
+                    nsfw =? options.nsfw,
+                    "Fetching user animelist"
+                );
+                let page = page_request
                     .send().await?;
                 let has_next = page.paging.as_ref().and_then(|p| p.next.as_ref()).is_some();
                 for edge in page.data {
@@ -201,11 +214,17 @@ impl SearchProvider for MalProvider {
         }
 
         if (normalized_itype == "manga" || normalized_itype == "all") && itype != "mangalist" {
-            let manga_results = self.client.manga().get().list()
+            let manga_results_request = self.client.manga().get().list()
                 .q(query)
                 .limit(api_limit as u16)
                 .fields(MANGA_FIELDS)
-                .nsfw(options.nsfw)
+                .nsfw(options.nsfw);
+            debug!(
+                ?query,
+                nsfw =? options.nsfw,
+                "Searching for manga"
+            );
+            let manga_results = manga_results_request
                 .send().await?;
             for edge in manga_results.data {
                 let node = edge.node;
@@ -229,12 +248,18 @@ impl SearchProvider for MalProvider {
             const PAGE_SIZE: u16 = 1000;
             let mut offset: u64 = 0;
             loop {
-                let page = self.client.user_mangalist()
+                let page_request = self.client.user_mangalist()
                     .get()
                     .user_name(myanimelist::objects::Username::User(username.into()))
                     .limit(PAGE_SIZE)
                     .offset(offset)
-                    .nsfw(options.nsfw)
+                    .nsfw(options.nsfw);
+                debug!(
+                    username =? username.clone(),
+                    nsfw =? options.nsfw,
+                    "Fetching user mangalist"
+                );
+                let page = page_request
                     .send().await?;
                 let has_next = page.paging.as_ref().and_then(|p| p.next.as_ref()).is_some();
                 for edge in page.data {

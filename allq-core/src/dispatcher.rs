@@ -38,7 +38,10 @@ impl SearchDispatcher {
         let mut results = Vec::new();
         for provider in &self.providers {
             if item_type.map_or(true, |t| provider.supported_item_types().contains(&t)) {
-                results.extend(provider.search(query, item_type, options).await?);
+                tracing::debug!("Searching provider: {}", provider.name());
+                let provider_results = provider.search(query, item_type, options).await?;
+                tracing::debug!("Provider {} returned {} results", provider.name(), provider_results.len());
+                results.extend(provider_results);
             }
         }
         Ok(results)

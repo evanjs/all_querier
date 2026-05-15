@@ -10,3 +10,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 foyer = { version = "0.22.3", features = ["serde"] }
 dirs = "6.0.0"
+tracing = { workspace = true }

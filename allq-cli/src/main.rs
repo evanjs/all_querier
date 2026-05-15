@@ -516,7 +516,7 @@ fn init_logging(debug_logging: bool) -> anyhow::Result<()> {
         EnvFilter::try_new(rust_log)
             .context("invalid RUST_LOG env filter")?
     } else if debug_logging {
-        EnvFilter::try_new("warn,allq_cli=debug,allq_providers=debug,allq_wikidata=debug")
+        EnvFilter::try_new("warn,allq_cli=debug,allq_providers=debug,allq_wikidata=debug,allq_core=debug,allq_mal=debug,allq_pcgw=debug")
             .context("invalid built-in debug env filter")?
     } else {
         EnvFilter::try_new("warn")
