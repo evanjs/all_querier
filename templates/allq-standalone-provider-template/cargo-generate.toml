@@ -1,0 +1,11 @@
+[template]
+cargo_generate_version = ">=0.17.0"
+
+[placeholders.provider_name]
+type = "string"
+prompt = "Please enter the name of this provder (e.g. mal, pcgw)"
+default = "example-name"
+
+[hooks]
+init = ["init.rhai"]
+pre = ["pre.rhai"]
