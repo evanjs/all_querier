@@ -137,10 +137,20 @@ impl SearchProvider for MalProvider {
             "broadcast", "source", "average_episode_duration", "rating", "studios",
         ];
 
+        const ANIMELIST_FIELDS: &[&str] = &[
+            "status", "is_rewatching", "score", "num_episodes_watched", "priority",
+            "num_time_rewatched", "rewatch_value", "tags", "comments", "updated_at", "start_date", "end_date",
+        ];
+
         const MANGA_FIELDS: &[&str] = &[
             "id", "title", "main_picture", "alternative_titles", "start_date", "end_date",
             "synopsis", "mean", "rank", "popularity", "num_list_users", "num_scoring_users",
             "nsfw", "media_type", "status", "genres", "num_volumes", "num_chapters", "authors",
+        ];
+
+        const MANGALIST_FIELDS: &[&str] = &[
+            "status", "is_rereading", "score", "num_volumes_read", "num_chapters_read", "priority",
+            "num_times_reread", "reread_value", "tags", "comments", "updated_at", "start_date", "end_date"
         ];
 
         if (normalized_itype == "anime" || normalized_itype == "all") && itype != "animelist" {
@@ -182,6 +192,7 @@ impl SearchProvider for MalProvider {
                     .get()
                     .user_name(myanimelist::objects::Username::User(username.into()))
                     .limit(PAGE_SIZE)
+                    .fields(ANIMELIST_FIELDS)
                     .offset(offset)
                     .nsfw(options.nsfw);
                 debug!(
@@ -252,6 +263,7 @@ impl SearchProvider for MalProvider {
                     .get()
                     .user_name(myanimelist::objects::Username::User(username.into()))
                     .limit(PAGE_SIZE)
+                    .fields(MANGALIST_FIELDS)
                     .offset(offset)
                     .nsfw(options.nsfw);
                 debug!(
