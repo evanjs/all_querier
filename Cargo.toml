@@ -2,18 +2,28 @@
 members = [
     "allq-cli",
     "allq-core",
+    "allq-jikan",
     "allq-mal",
     "allq-musicbrainz",
-    "allq-providers",
     "allq-pcgw",
+    "allq-providers",
     "allq-query",
     "allq-wikidata",
-    "nu_plugin_all_querier"
+    "nu_plugin_all_querier",
 ]
 resolver = "3"
 
 [workspace.dependencies.allq-core]
 path = "./allq-core"
+
+[workspace.dependencies.allq-jikan]
+path = "./allq-jikan"
+
+[workspace.dependencies.allq-mal]
+path = "./allq-mal"
+
+[workspace.dependencies.allq-musicbrainz]
+path = "./allq-musicbrainz"
 
 [workspace.dependencies.allq-pcgw]
 path = "./allq-pcgw"
@@ -24,21 +34,8 @@ path = "./allq-providers"
 [workspace.dependencies.allq-query]
 path = "./allq-query"
 
-[workspace.dependencies.allq-mal]
-path = "./allq-mal"
-
-[workspace.dependencies.allq-musicbrainz]
-path = "./allq-musicbrainz"
-
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"
-
-[workspace.dependencies.tracing]
-version = "0.1"
-
-[workspace.dependencies.tracing-subscriber]
-version = "0.3"
-features = ["env-filter", "fmt"]
 
 [workspace.dependencies.tokio]
 version = "1.52.1"
@@ -46,4 +43,14 @@ features = [
     "rt",
     "rt-multi-thread",
     "macros",
+]
+
+[workspace.dependencies.tracing]
+version = "0.1"
+
+[workspace.dependencies.tracing-subscriber]
+version = "0.3"
+features = [
+    "env-filter",
+    "fmt",
 ]
