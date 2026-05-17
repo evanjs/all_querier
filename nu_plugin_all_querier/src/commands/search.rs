@@ -5,7 +5,7 @@ use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
 use nu_protocol::{
     Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value,
 };
-
+use allq_anilist::AniListProvider;
 use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
 use allq_jikan::JikanProvider;
 use allq_query::{add_fetch_flags, read_fetch_args};
@@ -17,7 +17,7 @@ use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
 use crate::{AllQuerierPlugin, init_logging, user_agent_email};
 
 /// Static list of provider names supported by the `search` command.
-pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist", "jikan"];
+pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist", "jikan", "anilist"];
 
 /// Returns the union of item types supported across all search providers,
 /// suitable for use as completion candidates for the `--type` flag.
@@ -239,6 +239,11 @@ async fn run_search(
     if should_add("jikan") {
         let cache = allq_core::create_provider_cache("jikan").await?;
         dispatcher.add_provider(Box::new(JikanProvider::new_with_cache(cache)))
+    }
+
+    if should_add("anilist") {
+        let cache = allq_core::create_provider_cache("anilist").await?;
+        dispatcher.add_provider(Box::new(AniListProvider::new_with_cache(cache)))
     }
 
     if should_add("myanimelist") {

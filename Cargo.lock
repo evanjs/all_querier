@@ -51,9 +51,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "allq-anilist"
+version = "0.1.0"
+dependencies = [
+ "allq-core",
+ "anilist_moe",
+ "anyhow",
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "allq-cli"
 version = "0.1.0"
 dependencies = [
+ "allq-anilist",
  "allq-core",
  "allq-mal",
  "allq-musicbrainz",
@@ -207,6 +223,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "anilist_moe"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5abf1f80d0c28239e048ca0c744e5ee6bad2574c61a38b09d451c2838ede305"
+dependencies = [
+ "chrono",
+ "dotenv",
+ "log",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -1135,6 +1168,12 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "dotenvy"
@@ -3006,6 +3045,7 @@ dependencies = [
 name = "nu_plugin_all_querier"
 version = "0.1.0+0.112.2"
 dependencies = [
+ "allq-anilist",
  "allq-core",
  "allq-jikan",
  "allq-mal",

@@ -16,6 +16,7 @@ use allq_musicbrainz::MusicBrainzSearchProvider;
 use allq_pcgw::PcgwSearchProvider;
 use allq_wikidata::WikidataSearchProvider;
 use tracing_subscriber::EnvFilter;
+use allq_anilist::AniListProvider;
 
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
@@ -478,6 +479,11 @@ async fn run_search(
     if should_add("pcgw") {
         let cache = allq_core::create_provider_cache("pcgw").await?;
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
+    }
+
+    if should_add("anilist") {
+        let cache = allq_core::create_provider_cache("anilist").await?;
+        dispatcher.add_provider(Box::new(AniListProvider::new_with_cache(cache)));
     }
 
     if should_add("myanimelist") {

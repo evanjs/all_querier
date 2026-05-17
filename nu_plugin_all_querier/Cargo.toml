@@ -16,6 +16,7 @@ license = "MIT"
 # nu-protocol = { path = "../nushell/crates/nu-protocol", features = ["plugin"] }
 nu-plugin = "0.112.2"
 nu-protocol = { version = "0.112.2", features = ["plugin"] }
+allq-anilist.workspace = true
 allq-core.workspace = true
 allq-jikan.workspace = true
 allq-musicbrainz.workspace = true

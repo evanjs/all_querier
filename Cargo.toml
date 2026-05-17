@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "allq-anilist",
     "allq-cli",
     "allq-core",
     "allq-jikan",
@@ -12,6 +13,9 @@ members = [
     "nu_plugin_all_querier",
 ]
 resolver = "3"
+
+[workspace.dependencies.allq-anilist]
+path = "./allq-anilist"
 
 [workspace.dependencies.allq-core]
 path = "./allq-core"

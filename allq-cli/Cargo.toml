@@ -12,6 +12,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # shared dependencies for projects in the workspace
+allq-anilist = { workspace = true }
 allq-core = { workspace = true }
 allq-mal = { workspace = true }
 allq-musicbrainz = { workspace = true }
