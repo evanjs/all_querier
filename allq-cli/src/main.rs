@@ -17,6 +17,7 @@ use allq_pcgw::PcgwSearchProvider;
 use allq_wikidata::WikidataSearchProvider;
 use tracing_subscriber::EnvFilter;
 use allq_anilist::AniListProvider;
+use allq_jikan::JikanProvider;
 
 #[derive(Debug, Parser)]
 #[command(name = "allq")]
@@ -479,6 +480,11 @@ async fn run_search(
     if should_add("pcgw") {
         let cache = allq_core::create_provider_cache("pcgw").await?;
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
+    }
+
+    if should_add("jikan") {
+        let cache = allq_core::create_provider_cache("jikan").await?;
+        dispatcher.add_provider(Box::new(JikanProvider::new_with_cache(cache)))
     }
 
     if should_add("anilist") {

@@ -71,6 +71,7 @@ version = "0.1.0"
 dependencies = [
  "allq-anilist",
  "allq-core",
+ "allq-jikan",
  "allq-mal",
  "allq-musicbrainz",
  "allq-pcgw",
