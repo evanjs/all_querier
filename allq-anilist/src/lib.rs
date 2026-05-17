@@ -1,8 +1,10 @@
 use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use async_trait::async_trait;
 use tracing::{debug, error};
 use anilist_moe::AniListClient;
+use anilist_moe::objects::media::Media;
+use anilist_moe::objects::responses::Page;
 
 pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "character"];
 
@@ -49,6 +51,170 @@ impl AniListProvider {
         if let Some(cache) = &self.cache {
             cache.insert(key, value);
         }
+    }
+
+    fn process_media_list_into_results(itype: &str, output_results: &mut Vec<SearchResult>, media_results: &Page<Vec<Media>>) {
+        media_results.data.iter().for_each(|node| {
+            output_results.push(SearchResult {
+                label: node.title.as_ref().unwrap().english.clone().unwrap_or("N/A".to_string()),
+                // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
+                //  e.g. in this case, AniList ID and MyAnimeList ID
+                id: node.id.map(|x| x.to_string()).or(Some("NO_ID".to_string())).unwrap(),
+                item_type: Some(itype.to_string()),
+                provider: "anilist".to_string(),
+                description: node.description.clone(),
+                data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+            });
+        });
+    }
+
+    fn filter_collection_by_media_type(options: &SearchOptions, results: &mut Vec<SearchResult>) {
+        if let Some(ref mt) = options.media_type {
+            results.retain(|r| {
+                r.data
+                    .get("media_type")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case(mt))
+                    .unwrap_or(false)
+            });
+        }
+    }
+
+    async fn process_anilist_media_query(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+        itype: &str,
+        limit: u32,
+        mut results: &mut Vec<SearchResult>
+    ) -> Result<(), Error> {
+        debug!(
+            ?query,
+            ?itype,
+            ?limit,
+            ?options,
+            "Processing search query for AniList"
+        );
+
+        let media_type = itype;
+
+        match media_type {
+            // both anime and manga use the "media" endpoint
+            "anime" | "manga" => {
+                let media_results_pre = self.client
+                    .media();
+
+                let media_results = match media_type {
+                    "anime" => {
+                        media_results_pre.search_anime(
+                            query,
+                            Some(1),
+                            Some(limit as i32),
+                        )
+                            .await
+                    }
+                    "manga" => {
+                        media_results_pre.search_anime(
+                            query,
+                            Some(1),
+                            Some(limit as i32),
+                        )
+                            .await
+                    }
+                    // XXX: Not sure why we need to handle fallthrough if the parent match already
+                    //   accounts for only "anime" or "manga"
+                    //   Perhaps it is because the variables are not the "same"?
+                    _ => {
+                        error!(
+                            media_type =? media_type,
+                            "Unsupported media type"
+                        );
+                        return Err(anyhow!("Unsupported media type a"));
+                    }
+                };
+
+                let media_results = match media_results {
+                    Ok(o) => o,
+                    Err(e) => {
+                        error!(
+                            error =? e,
+                            ?media_type,
+                            "Encountered error when searching AniList"
+                        );
+                        return Err(anyhow!(e));
+                    }
+                };
+
+                Self::process_media_list_into_results(itype, &mut results, &media_results);
+
+                Self::filter_collection_by_media_type(options, &mut results);
+
+                // Apply the user-requested limit after filtering so the final result
+                // count is correct regardless of how many items were filtered out.
+                let mut data = media_results.data.clone();
+                data.truncate(limit as usize);
+
+                Ok(())
+            }
+            _ => {
+                error!(
+                    media_type =? media_type,
+                    "Unsupported media type"
+                );
+                Err(anyhow!("Unsupported media type b"))
+            }
+        }
+    }
+
+    async fn process_anilist_character_query(
+        &self, query: &str,
+        options: &SearchOptions,
+        itype: &str,
+        limit: u32,
+        mut results: &mut Vec<SearchResult>
+    ) -> Result<(), Error> {
+        let character_results = self.client
+            .character()
+            .search(
+                query,
+                Some(1),
+                Some(limit as i32)
+            )
+            .await;
+
+        let character_results = match character_results {
+            Ok(o) => {
+                o
+            },
+            Err(e) => {
+                error!(
+                    error =? e,
+                    "Encountered error when searching character using AniList"
+                );
+                return Err(anyhow!(e))
+            }
+        };
+
+        for node in character_results.data {
+            results.push(SearchResult {
+                label: node.name.as_ref().unwrap().full.clone().unwrap_or("N/A".to_string()),
+                // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
+                //  e.g. in this case, AniList ID and MyAnimeList ID
+                id: node.id.to_string(),
+                item_type: Some(itype.to_string()),
+                provider: "anilist".to_string(),
+                description: node.description.clone(),
+                data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+            });
+        }
+
+        Self::filter_collection_by_media_type(options, &mut results);
+
+        // Apply the user-requested limit after filtering so the final result
+        // count is correct regardless of how many items were filtered out.
+        results.truncate(limit as usize);
+
+        Ok(())
     }
 }
 
@@ -103,8 +269,6 @@ impl SearchProvider for AniListProvider {
 
         // TODO: implement caching and adhere to user-specified caching mode
         //   e.g. force-fetch, cache-only, etc.
-        //   This will probably be easier after deduplicating logic shared between
-        //   search handlers
 
         debug!(
             ?query,
@@ -115,164 +279,18 @@ impl SearchProvider for AniListProvider {
             "Searching AniList"
         );
 
-        // TODO: deduplicate shared search params configuration
-
         match normalized_itype {
-            "anime" => {
-                let anime_results = self.client
-                    .media()
-                    .search_anime(
-                        query,
-                        Some(1),
-                        Some(limit as i32)
-                    )
-                    .await;
-
-                let anime_results = match anime_results {
-                    Ok(o) => {
-                        o
-                    },
-                    Err(e) => {
-                        error!(
-                            error =? e,
-                            "Encountered error when searching anime using AniList"
-                        );
-                        return Err(anyhow!(e))
-                    }
-                };
-
-                for node in anime_results.data {
-                    results.push(SearchResult {
-                        label: node.title.as_ref().unwrap().english.clone().unwrap_or("N/A".to_string()),
-                        // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
-                        //  e.g. in this case, AniList ID and MyAnimeList ID
-                        id: node.id.map(|x|x.to_string()).or(Some("NO_ID".to_string())).unwrap(),
-                        item_type: Some(itype.to_string()),
-                        provider: "anilist".to_string(),
-                        description: node.description.clone(),
-                        data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
-                    });
+            "anime" | "manga" => {
+                match self.process_anilist_media_query(query, options, itype, api_limit, &mut results).await {
+                    Ok(_) => Ok(results),
+                    Err(value) => Err(value),
                 }
-
-                if let Some(ref mt) = options.media_type {
-                    results.retain(|r| {
-                        r.data
-                            .get("media_type")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.eq_ignore_ascii_case(mt))
-                            .unwrap_or(false)
-                    });
-                }
-
-                // Apply the user-requested limit after filtering so the final result
-                // count is correct regardless of how many items were filtered out.
-                results.truncate(limit as usize);
-
-                Ok(results)
-            },
-            "manga" => {
-                let manga_results = self.client
-                    .media()
-                    .search_manga(
-                        query,
-                        Some(1),
-                        Some(limit as i32)
-                    )
-                    .await;
-
-                let manga_results = match manga_results {
-                    Ok(o) => {
-                        o
-                    },
-                    Err(e) => {
-                        error!(
-                            error =? e,
-                            "Encountered error when searching manga using AniList"
-                        );
-                        return Err(anyhow!(e))
-                    }
-                };
-
-                for node in manga_results.data {
-                    results.push(SearchResult {
-                        label: node.title.as_ref().unwrap().english.clone().unwrap_or("N/A".to_string()),
-                        // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
-                        //  e.g. in this case, AniList ID and MyAnimeList ID
-                        id: node.id.map(|x|x.to_string()).or(Some("NO_ID".to_string())).unwrap(),
-                        item_type: Some(itype.to_string()),
-                        provider: "anilist".to_string(),
-                        description: node.description.clone(),
-                        data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
-                    });
-                }
-
-                if let Some(ref mt) = options.media_type {
-                    results.retain(|r| {
-                        r.data
-                            .get("media_type")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.eq_ignore_ascii_case(mt))
-                            .unwrap_or(false)
-                    });
-                }
-
-                // Apply the user-requested limit after filtering so the final result
-                // count is correct regardless of how many items were filtered out.
-                results.truncate(limit as usize);
-
-                Ok(results)
             },
             "character" => {
-                let character_results = self.client
-                    .character()
-                    .search(
-                        query,
-                        Some(1),
-                        Some(limit as i32)
-                    )
-                    .await;
-
-                let character_results = match character_results {
-                    Ok(o) => {
-                        o
-                    },
-                    Err(e) => {
-                        error!(
-                            error =? e,
-                            "Encountered error when searching character using AniList"
-                        );
-                        return Err(anyhow!(e))
-                    }
-                };
-
-                for node in character_results.data {
-                    results.push(SearchResult {
-                        label: node.name.as_ref().unwrap().full.clone().unwrap_or("N/A".to_string()),
-                        // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
-                        //  e.g. in this case, AniList ID and MyAnimeList ID
-                        id: node.id.to_string(),
-                        item_type: Some(itype.to_string()),
-                        provider: "anilist".to_string(),
-                        description: node.description.clone(),
-                        data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
-                    });
+                match self.process_anilist_character_query(query, options, itype, api_limit, &mut results).await {
+                    Ok(_) => Ok(results),
+                    Err(value) => Err(value)
                 }
-
-                if let Some(ref mt) = options.media_type {
-                    results.retain(|r| {
-                        r.data
-                            .get("media_type")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.eq_ignore_ascii_case(mt))
-                            .unwrap_or(false)
-                    });
-                }
-
-                // Apply the user-requested limit after filtering so the final result
-                // count is correct regardless of how many items were filtered out.
-                results.truncate(limit as usize);
-
-                Ok(results)
             },
             _ => {
                 Err(anyhow::anyhow!("Unsupported item type: {}", itype))
