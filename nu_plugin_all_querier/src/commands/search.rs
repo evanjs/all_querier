@@ -5,7 +5,7 @@ use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
 use nu_protocol::{
     Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value,
 };
-use allq_anilist::AniListProvider;
+use allq_anilist::{AniListProvider, SUPPORTED_TYPES as ANILIST_SUPPORTED_TYPES};
 use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
 use allq_jikan::JikanProvider;
 use allq_query::{add_fetch_flags, read_fetch_args};
@@ -41,6 +41,11 @@ fn search_item_type_completions() -> &'static [&'static str] {
             }
         }
         for &t in MAL_SUPPORTED_TYPES {
+            if !types.contains(&t) {
+                types.push(t);
+            }
+        }
+        for &t in ANILIST_SUPPORTED_TYPES {
             if !types.contains(&t) {
                 types.push(t);
             }

@@ -6,7 +6,7 @@ use anilist_moe::AniListClient;
 use anilist_moe::objects::media::Media;
 use anilist_moe::objects::responses::Page;
 
-pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "character"];
+pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "character", "person"];
 
 /// A `SearchProvider` backed by the AniListProvider API.
 pub struct AniListProvider {
@@ -166,6 +166,62 @@ impl AniListProvider {
         }
     }
 
+    async fn process_anilist_staff_query(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+        itype: &str,
+        limit: u32,
+        mut results: &mut Vec<SearchResult>
+    ) -> Result<(), Error> {
+        debug!(
+            ?query,
+            ?options,
+            ?itype,
+            ?limit,
+            "Searching for staff on AniList"
+        );
+        let staff_results = self.client
+            .staff()
+            .search(
+                query, // query
+                Some(1), // page number
+                Some(limit as i32) // number of results per page
+            )
+            .await;
+
+        let staff_results = match staff_results {
+            Ok(o) => o,
+            Err(e) => {
+                error!(
+                    error =? e,
+                    "Encountered error when searching staff using AniList"
+                );
+                return Err(anyhow!(e))
+            }
+        };
+
+        for node in staff_results.data {
+            results.push(SearchResult {
+                label: node.name.as_ref().unwrap().full.clone().unwrap_or("N/A".to_string()),
+                // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
+                //  e.g. in this case, AniList ID and MyAnimeList ID
+                id: node.id.to_string(),
+                item_type: Some(itype.to_string()),
+                provider: "anilist".to_string(),
+                description: node.description.clone(),
+                data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+            });
+        }
+
+        Self::filter_collection_by_media_type(options, &mut results);
+
+        // Apply the user-requested limit after filtering so the final result
+        // count is correct regardless of how many items were filtered out.
+        results.truncate(limit as usize);
+
+        Ok(())
+    }
     async fn process_anilist_character_query(
         &self, query: &str,
         options: &SearchOptions,
@@ -241,6 +297,7 @@ impl SearchProvider for AniListProvider {
         let normalized_itype = match itype {
             "animelist" => "anime",
             "mangalist" => "manga",
+            "person" => "staff",
             _ => itype,
         };
 
@@ -272,7 +329,13 @@ impl SearchProvider for AniListProvider {
 
         let fetch_mode = options.fetch_mode;
         let limit = options.limit.unwrap_or(10).min(50);
-        let search_cache_key = format!("anilist:search:{itype}:{query}:{limit}");
+        let search_cache_key = format!("anilist:search:{normalized_itype}:{query}:{limit}");
+        debug!(
+            ?query,
+            ?fetch_mode,
+            ?limit,
+            ?search_cache_key
+        );
 
         // Try to serve the full result list from cache.
         if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
@@ -311,8 +374,14 @@ impl SearchProvider for AniListProvider {
                     Err(value) => Err(value)
                 }
             },
+            "staff" => {
+                match self.process_anilist_staff_query(query, options, itype, api_limit, &mut results).await {
+                    Ok(_) => Ok(results),
+                    Err(value) => Err(value)
+                }
+            },
             _ => {
-                Err(anyhow::anyhow!("Unsupported item type: {}", itype))
+                Err(anyhow::anyhow!("Unsupported item type: {} (normalized: {})", itype, normalized_itype))
             }
         }?;
 
