@@ -1,5 +1,5 @@
 use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use async_trait::async_trait;
 use tracing::{debug, error};
 use anilist_moe::AniListClient;
@@ -270,6 +270,23 @@ impl SearchProvider for AniListProvider {
         // TODO: implement caching and adhere to user-specified caching mode
         //   e.g. force-fetch, cache-only, etc.
 
+        let fetch_mode = options.fetch_mode;
+        let limit = options.limit.unwrap_or(10).min(50);
+        let search_cache_key = format!("anilist:search:{itype}:{query}:{limit}");
+
+        // Try to serve the full result list from cache.
+        if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
+            let value: serde_json::Value = serde_json::from_str(&cached)
+                .context("failed to deserialize cached AniList search results")?;
+            let results: Vec<SearchResult> = serde_json::from_value(value)
+                .context("failed to convert cached AniList search results")?;
+            return Ok(results);
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            return Ok(Vec::new());
+        }
+
         debug!(
             ?query,
             nsfw =? options.nsfw,
@@ -279,10 +296,12 @@ impl SearchProvider for AniListProvider {
             "Searching AniList"
         );
 
-        match normalized_itype {
+        let result = match normalized_itype {
             "anime" | "manga" => {
                 match self.process_anilist_media_query(query, options, itype, api_limit, &mut results).await {
-                    Ok(_) => Ok(results),
+                    Ok(_) => {
+                        Ok(results)
+                    },
                     Err(value) => Err(value),
                 }
             },
@@ -295,6 +314,13 @@ impl SearchProvider for AniListProvider {
             _ => {
                 Err(anyhow::anyhow!("Unsupported item type: {}", itype))
             }
+        }?;
+
+        // Cache the assembled result list.searc
+        if let Ok(json) = serde_json::to_string(&result) {
+            self.cache_insert(search_cache_key, json, fetch_mode).await;
         }
+
+        Ok(result)
     }
 }
