@@ -3,6 +3,7 @@ use anyhow::{anyhow, Context, Error, Result};
 use async_trait::async_trait;
 use tracing::{debug, error};
 use anilist_moe::AniListClient;
+use anilist_moe::endpoints::media::FetchMediaOptions;
 use anilist_moe::objects::media::Media;
 use anilist_moe::objects::responses::Page;
 
@@ -51,6 +52,32 @@ impl AniListProvider {
         if let Some(cache) = &self.cache {
             cache.insert(key, value);
         }
+    }
+
+    fn get_default_fetch_media_options(&self) -> FetchMediaOptions {
+        let mut options = FetchMediaOptions::default();
+        options.include_external_links = Some(true);
+        options.include_country_of_origin = Some(true);
+        options.include_duration = Some(true);
+        options.include_is_licensed = Some(true);
+        options.include_hashtag = Some(true);
+        options.include_end_date = Some(true);
+        options.include_start_date = Some(true);
+        options.include_studios = Some(true);
+        options.include_tags = Some(true);
+        options.include_volumes = Some(true);
+        options.include_streaming_episodes = Some(true);
+        options.include_source = Some(true);
+        // Less static values
+        // Not sure if it's "correct" to include these by default
+        // Especially re: accuracy of "cached" values
+        // options.include_next_airing_episode = Some(true);
+        //
+        // Values that might require pagination
+        // options.include_characters = Some(true);
+        // options.include_relations = Some(true);
+        // options.include_staff = Some(true);
+        options
     }
 
     fn process_media_list_into_results(itype: &str, output_results: &mut Vec<SearchResult>, media_results: &Page<Vec<Media>>) {
@@ -104,20 +131,23 @@ impl AniListProvider {
                 let media_results_pre = self.client
                     .media();
 
+                let mut fetch_options = self.get_default_fetch_media_options();
+                fetch_options.search = Some(query.to_string());
+                fetch_options.per_page = Some(options.limit.unwrap_or(10u32) as i32);
+                fetch_options.page = Some(1);
+
                 let media_results = match media_type {
                     "anime" => {
-                        media_results_pre.search_anime(
-                            query,
-                            Some(1),
-                            Some(limit as i32),
+                        fetch_options.media_type = Some(anilist_moe::enums::media::MediaType::Anime);
+                        media_results_pre.fetch(
+                            &fetch_options
                         )
                             .await
                     }
                     "manga" => {
-                        media_results_pre.search_anime(
-                            query,
-                            Some(1),
-                            Some(limit as i32),
+                        fetch_options.media_type = Some(anilist_moe::enums::media::MediaType::Manga);
+                        media_results_pre.fetch(
+                          &fetch_options
                         )
                             .await
                     }
