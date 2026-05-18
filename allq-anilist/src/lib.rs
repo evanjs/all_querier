@@ -3,6 +3,7 @@ use anyhow::{anyhow, Context, Error, Result};
 use async_trait::async_trait;
 use tracing::{debug, error};
 use anilist_moe::AniListClient;
+use anilist_moe::endpoints::character::FetchCharacterOptions;
 use anilist_moe::endpoints::media::FetchMediaOptions;
 use anilist_moe::objects::media::Media;
 use anilist_moe::objects::responses::Page;
@@ -259,13 +260,11 @@ impl AniListProvider {
         limit: u32,
         mut results: &mut Vec<SearchResult>
     ) -> Result<(), Error> {
+        let mut fetch_options = FetchCharacterOptions::default();
+        fetch_options.search = Some(query.to_string());
         let character_results = self.client
             .character()
-            .search(
-                query,
-                Some(1),
-                Some(limit as i32)
-            )
+            .fetch(&fetch_options)
             .await;
 
         let character_results = match character_results {
@@ -358,7 +357,8 @@ impl SearchProvider for AniListProvider {
         //   e.g. force-fetch, cache-only, etc.
 
         let fetch_mode = options.fetch_mode;
-        let limit = options.limit.unwrap_or(10).min(50);
+        // default to one for "single search" mode
+        let limit = options.limit.unwrap_or(1);
         let search_cache_key = format!("anilist:search:{normalized_itype}:{query}:{limit}");
         debug!(
             ?query,
