@@ -1,36 +1,130 @@
-use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
+mod oauth2;
+
+use std::{env, fs};
+use std::num::ParseIntError;
+use allq_core::{all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::{anyhow, Context, Error, Result};
 use async_trait::async_trait;
-use tracing::{debug, error};
+use tracing::{debug, error, info, trace, warn};
 use anilist_moe::AniListClient;
 use anilist_moe::endpoints::character::FetchCharacterOptions;
 use anilist_moe::endpoints::media::FetchMediaOptions;
+use anilist_moe::endpoints::MediaListEndpoint;
+use anilist_moe::endpoints::user::FetchUserMediaListOptions;
+use anilist_moe::enums::media::MediaType;
+use anilist_moe::enums::media_list::MediaListStatus;
+use anilist_moe::objects::common::PageInfo;
 use anilist_moe::objects::media::Media;
 use anilist_moe::objects::responses::Page;
+use serde::Deserialize;
+use crate::oauth2::{get_oauth2_token, wait_for_oauth2_input};
 
-pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "character", "person"];
+pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "character", "person", "animelist", "mangalist"];
+
+
+#[derive(Deserialize, Debug, Default)]
+struct AniListConfig {
+    client_id: Option<u32>,
+    client_secret: Option<String>,
+    access_token: Option<String>,
+}
+
+pub fn get_config() -> Result<AniListConfig> {
+    let mut access_token = 0;
+    match env::var("ANILIST_TOKEN") {
+        Ok(token) => {
+            match token.parse::<u32>() {
+                Ok(parsed_token) => {
+                    access_token = parsed_token;
+                }
+                Err(e) => {
+                    warn!("Failed to parse token ({token}) as u32: {e}");
+                }
+            };
+        },
+        Err(e) => {
+            warn!("Failed to retrieve ANILIST_TOKEN from environment: {e}");
+        }
+    };
+
+    trace!("Attempting to parse AniList configuration file");
+    let path = all_querier_data_dir().join("anilist_config.json");
+    let config = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        let config: AniListConfig = serde_json::from_str(&content)?;
+        debug!(
+            ?config,
+            "Retrieved AniList configuration from disk"
+        );
+        config
+    } else {
+        AniListConfig {
+            ..Default::default()
+        }
+    };
+
+    return Ok(config);
+
+    anyhow::bail!("Please set ANILIST_TOKEN in environment or in {:?}", path);
+}
+
 
 /// A `SearchProvider` backed by the AniListProvider API.
 pub struct AniListProvider {
     client: AniListClient,
-    cache: Option<ProviderCache>
+    cache: Option<ProviderCache>,
 }
 
 impl AniListProvider {
     /// Create a new provider with no cache.
+    // TODO: perhaps this would be better as a default since there are no parameters
+    //   then we might allow optional parameters in this function (`new`), perhaps?
     pub fn new() -> Self {
+        let mut client = AniListClient::new();
+        match get_config() {
+            Ok(config) => {
+                match config.access_token {
+                    None => {
+                        warn!("No access token provided. Fetching ...");
+                        match get_oauth2_token(config.client_id) {
+                            Ok(csrf_token) => {
+                                match wait_for_oauth2_input(&csrf_token) {
+                                    Ok(token) => {
+                                        client.set_token(&token);
+                                    },
+                                    Err(e) => {
+                                        error!("Failed to complete OAUTH2 authentication process: {e}");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to retrieve access token for user. Falling back to unauthenticated mode")
+                            }
+                        }
+
+                    }
+                    Some(access_token) => {
+                        client.set_token(&access_token);
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("Failed to retrieve AniList configuration: {e}");
+            }
+        }
+
         Self {
-            client: AniListClient::new(),
+            client,
             cache: None
         }
     }
 
     /// Create a new provider with the given user-agent string and a foyer hybrid cache.
     pub fn new_with_cache(cache: ProviderCache) -> Self {
-        Self {
-            client: AniListClient::new(),
-            cache: Some(cache),
-        }
+        let mut anilist_provider = Self::new();
+        anilist_provider.cache = Some(cache);
+
+        anilist_provider
     }
 
     /// Look up a cached JSON string for `key`, respecting `fetch_mode`.
@@ -262,6 +356,8 @@ impl AniListProvider {
     ) -> Result<(), Error> {
         let mut fetch_options = FetchCharacterOptions::default();
         fetch_options.search = Some(query.to_string());
+        fetch_options.include_media = Some(true);
+        fetch_options.per_page = Option::from(limit as i32);
         let character_results = self.client
             .character()
             .fetch(&fetch_options)
@@ -300,6 +396,166 @@ impl AniListProvider {
         results.truncate(limit as usize);
 
         Ok(())
+    }
+
+    async fn process_anilist_user_query(
+        &self,
+        options: &SearchOptions,
+        itype: &str,
+        limit: u32,
+        mut results: &mut Vec<SearchResult>
+    ) -> Result<(), Error> {
+        assert_ne!(options.anilist_username, None, "\"anilist_username\" is empty but must be set");
+        debug!(
+            client =? self.client,
+        );
+        let user_info = self.client.user().get_current_user().await?;
+        let username = user_info.name.as_ref().unwrap();
+        let medialist = self.client.medialist();
+        debug!(
+            ?user_info,
+            "Info for current authenticated user"
+        );
+        let effective_limit = Some(limit as i32);
+        let mut page_number = 1;
+        let status = None;
+        debug!(
+            ?effective_limit,
+            ?page_number
+        );
+
+        // process first page
+        let first_page_result = Self::process_user_medialist_page(
+            itype,
+            &mut results,
+            username,
+            &medialist,
+            effective_limit,
+            Some(page_number),
+            status
+        ).await?;
+        debug!(
+            ?status,
+            ?page_number,
+            ?username,
+            ?itype,
+            ?effective_limit,
+            page_info =? &first_page_result.page_info,
+            "First page results"
+        );
+
+
+        let total_items = first_page_result.data.len() as i32;
+        let mut processed_items = total_items;
+
+        let mut iterating = matches!(first_page_result.page_info, Some(info) if info.has_next_page.unwrap_or(false));
+
+        // if total items in the list does not exceed the user-defined limit (or default limit)
+        // then attempt to iterate the list further
+            while iterating {
+                if Some(processed_items) < effective_limit {
+                    info!("Processed items ({}) does not exceed that of effective limit ({:?}). Continuing ...", processed_items, effective_limit);
+                    page_number += 1;
+                    // then second page and onward if needed
+                    let next_page = Self::process_user_medialist_page(
+                        itype,
+                        &mut results,
+                        username,
+                        &medialist,
+                        effective_limit,
+                        Some(page_number),
+                        status
+                    ).await?;
+
+                    let more_items = next_page.data.len() as i32;
+                    processed_items += more_items;
+
+                    iterating = matches!(next_page.page_info, Some(info) if info.has_next_page.unwrap_or(false));
+                } else {
+                    // if we have exceeded the limit, short circuit and return
+                    warn!("Processed items ({}) exceeds that of effective limit ({:?}). Short circuiting ...", processed_items, effective_limit);
+                    break
+                }
+            }
+        Ok(())
+    }
+
+    async fn process_user_medialist_page(
+        itype: &str,
+        results: &mut Vec<SearchResult>,
+        username: &String,
+        medialist: &MediaListEndpoint,
+        effective_limit: Option<i32>,
+        page_number: Option<i32>,
+        status: Option<MediaListStatus>
+    ) -> Result<Page<Vec<anilist_moe::objects::media_list::MediaList>>> {
+        debug!(
+            page_number =? page_number.as_ref(),
+            media_type =? itype,
+            "Retrieving page for medialist"
+        );
+        let medialist_results = match itype {
+            "animelist" => {
+                medialist
+                    .get_user_anime_list(username, status, page_number, effective_limit)
+                    .await
+            }
+            "mangalist" => {
+                medialist
+                    .get_user_manga_list(username, status, page_number, effective_limit)
+                    .await
+            },
+            _ => panic!("Unrecognized itype input. Must be either \"animelist\" or \"mangalist\"")
+        };
+
+        trace!(
+            intermediate_medialist_results =? medialist_results,
+        );
+
+        let mut medialist_results = match medialist_results {
+            Ok(o) => {
+                trace!(
+                    page =? &o,
+                );
+                o
+            },
+            Err(e) => {
+                error!(
+                    error =? e,
+                    "Encountered error when searching character using AniList"
+                );
+                return Err(anyhow!(e))
+            }
+        };
+
+        trace!(
+            ?medialist_results,
+            "Got medialist results"
+        );
+
+        for node in &medialist_results.data {
+            let title = node.media.as_ref().map(|media|
+                media.title.clone().map(|t|
+                    t.user_preferred.or(
+                        t.english.or(
+                            t.romaji.as_ref().or(t.native.as_ref()).cloned()
+                        )
+                    )
+                )
+            )
+                .flatten().flatten().unwrap_or_else(|| "Untitled media".to_string());
+            results.push(SearchResult {
+                label: title.clone(),
+                // TODO: Account for <NATIVE_ID> and <EXTERNAL_PROVIDER_ID>
+                //  e.g. in this case, AniList ID and MyAnimeList ID
+                id: node.id.to_string(),
+                item_type: Some(itype.to_string()),
+                provider: "anilist".to_string(),
+                description: Some(node.media.as_ref().unwrap().description.as_ref().unwrap_or(&"N/A".to_string()).to_string()),
+                data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+            });
+        }
+        Ok(medialist_results)
     }
 }
 
@@ -359,7 +615,7 @@ impl SearchProvider for AniListProvider {
         let fetch_mode = options.fetch_mode;
         // default to one for "single search" mode
         let limit = options.limit.unwrap_or(1);
-        let search_cache_key = format!("anilist:search:{normalized_itype}:{query}:{limit}");
+        let search_cache_key = format!("anilist:search:{itype}:{query}:{limit}");
         debug!(
             ?query,
             ?fetch_mode,
@@ -389,7 +645,7 @@ impl SearchProvider for AniListProvider {
             "Searching AniList"
         );
 
-        let result = match normalized_itype {
+        let result = match itype {
             "anime" | "manga" => {
                 match self.process_anilist_media_query(query, options, itype, api_limit, &mut results).await {
                     Ok(_) => {
@@ -404,18 +660,24 @@ impl SearchProvider for AniListProvider {
                     Err(value) => Err(value)
                 }
             },
-            "staff" => {
+            "person" => {
                 match self.process_anilist_staff_query(query, options, itype, api_limit, &mut results).await {
                     Ok(_) => Ok(results),
                     Err(value) => Err(value)
                 }
             },
+            "animelist" | "mangalist" => {
+                match self.process_anilist_user_query(options, itype, api_limit, &mut results).await {
+                    Ok(_) => Ok(results),
+                    Err(value) => Err(value)
+                }
+            }
             _ => {
                 Err(anyhow::anyhow!("Unsupported item type: {} (normalized: {})", itype, normalized_itype))
             }
         }?;
 
-        // Cache the assembled result list.searc
+        // Cache the assembled result list
         if let Ok(json) = serde_json::to_string(&result) {
             self.cache_insert(search_cache_key, json, fetch_mode).await;
         }

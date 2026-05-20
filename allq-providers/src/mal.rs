@@ -57,7 +57,8 @@ impl ExternalIdPageProvider for MalProvider {
             "fetching MyAnimeList page via API",
         );
 
-        let client_id_str = allq_mal::get_client_id()?;
+        let client_id = allq_mal::get_client_id()?.clone();
+        let client_id_str = client_id.as_str();
 
         // We bypass http_client.get_text to inject the X-MAL-CLIENT-ID header using the inner reqwest client. 
         // ProviderHttpClient doesn't expose a way to inject headers natively without modifying the common struct.

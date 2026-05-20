@@ -1,10 +1,12 @@
 use std::path::PathBuf;
-
+use std::time::Duration;
 use anyhow::Context;
 use clap::{
     Parser,
     Subcommand,
 };
+use serde_json::to_string;
+use tracing::{debug, warn};
 use allq_core::{FetchMode, SearchDispatcher, SearchOptions, SearchResult};
 use allq_query::{
     FetchArgs,
@@ -155,6 +157,9 @@ enum Command {
         /// Use a specific MyAnimeList username for `animelist`/`mangalist` searches
         #[arg(long = "mal-username")]
         mal_username: Option<String>,
+
+        #[arg(long = "anilist-username")]
+        anilist_username: Option<String>,
 
         /// Include NSFW results in MAL searches
         #[arg(long)]
@@ -344,6 +349,7 @@ async fn try_main() -> anyhow::Result<()> {
             pretty,
             media_type,
             mal_username,
+            anilist_username,
             nsfw,
             verbose: _,
         } => {
@@ -374,6 +380,7 @@ async fn try_main() -> anyhow::Result<()> {
                 fetch_mode,
                 media_type.as_deref(),
                 mal_username.as_deref(),
+                anilist_username.as_deref(),
                 nsfw,
             )
             .await?;
@@ -461,14 +468,17 @@ async fn run_search(
     fetch_mode: FetchMode,
     media_type: Option<&str>,
     mal_username: Option<&str>,
+    anilist_username: Option<&str>,
     nsfw: bool,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
+    //let mut caches = Vec::new();
 
     let should_add = |name: &str| provider_filter.map_or(true, |f| f == name);
 
     if should_add("musicbrainz") {
         let cache = allq_core::create_provider_cache("musicbrainz").await?;
+        //caches.push(cache.clone());
         dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
@@ -479,16 +489,19 @@ async fn run_search(
 
     if should_add("pcgw") {
         let cache = allq_core::create_provider_cache("pcgw").await?;
+        //caches.push(cache.clone());
         dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
     }
 
     if should_add("jikan") {
         let cache = allq_core::create_provider_cache("jikan").await?;
+        //caches.push(cache.clone());
         dispatcher.add_provider(Box::new(JikanProvider::new_with_cache(cache)))
     }
 
     if should_add("anilist") {
         let cache = allq_core::create_provider_cache("anilist").await?;
+        //caches.push(cache.clone());
         dispatcher.add_provider(Box::new(AniListProvider::new_with_cache(cache)));
     }
 
@@ -517,10 +530,24 @@ async fn run_search(
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
         mal_username: mal_username.map(|s| s.to_string()),
+        anilist_username: anilist_username.map(|s|s.to_string()),
         nsfw,
     };
 
-    dispatcher.search(query, item_type, &options).await
+    let results = dispatcher.search(query, item_type, &options).await?;
+    //tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    debug!("search returned; dropping dispatcher");
+    drop(dispatcher);
+    debug!("dispatcher dropped; waiting for caches");
+
+    // for cache in caches {
+    //     match tokio::time::timeout(Duration::from_secs(2), cache.storage().wait()).await {
+    //         Ok(()) => debug!("cache storage queue drained"),
+    //         Err(_) => warn!("timed out waiting for cache storage queue to drain"),
+    //     }
+    // }
+
+    Ok(results)
 }
 
 fn init_logging(debug_logging: bool) -> anyhow::Result<()> {

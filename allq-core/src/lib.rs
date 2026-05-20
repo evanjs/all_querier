@@ -33,6 +33,7 @@ pub struct SearchOptions {
     pub media_type: Option<String>,
     /// Optional MyAnimeList username for user-list endpoints.
     pub mal_username: Option<String>,
+    pub anilist_username: Option<String>,
     /// Include NSFW results (passed to MAL `.nsfw()` parameter).
     pub nsfw: bool,
 }
@@ -52,6 +53,19 @@ pub struct SearchResult {
     pub item_type: Option<String>,
     /// Full provider-specific payload.
     pub data: serde_json::Value,
+}
+
+impl Default for SearchResult {
+    fn default() -> Self {
+        Self {
+            provider: "".to_string(),
+            id: "".to_string(),
+            label: "".to_string(),
+            description: None,
+            item_type: None,
+            data: Default::default(),
+        }
+    }
 }
 
 /// Trait that all search backends implement.

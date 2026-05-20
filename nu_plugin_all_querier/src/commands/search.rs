@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
-use tracing::debug;
+use std::time::Duration;
+use tracing::{debug, warn};
 
 use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
 use nu_protocol::{
@@ -15,6 +16,16 @@ use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
 
 use crate::{AllQuerierPlugin, init_logging, user_agent_email};
+
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+fn runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
+    Ok(RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("failed to create Tokio runtime")
+    }))
+}
 
 /// Static list of provider names supported by the `search` command.
 pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist", "jikan", "anilist"];
@@ -102,6 +113,11 @@ impl SimplePluginCommand for Search {
                     .arg(SyntaxShape::String)
                     .desc("Use a specific MyAnimeList username for animelist or mangalist searches"),
             )
+            .param(
+                Flag::new("anilist-username")
+                    .arg(SyntaxShape::String)
+                    .desc("Use a specific AniList username for animelist or mangalist searches"),
+            )
             .switch(
                 "nsfw",
                 "Include NSFW results in MAL searches",
@@ -174,6 +190,7 @@ impl SimplePluginCommand for Search {
         let fetch = read_fetch_args(call).map_err(|e| e)?;
         let media_type: Option<String> = call.get_flag("media-type")?;
         let mal_username: Option<String> = call.get_flag("mal-username")?;
+        let anilist_username: Option<String> = call.get_flag("anilist-username")?;
         let nsfw = call.has_flag("nsfw")?;
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
@@ -189,10 +206,8 @@ impl SimplePluginCommand for Search {
             FetchMode::NetworkFallback
         };
 
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| labeled_error(head, "Failed to create Tokio runtime", e))?;
-
-        let results = runtime
+        let results = runtime()
+            .map_err(|e| labeled_error(head, "Failed to create Tokio runtime", e))?
             .block_on(run_search(
                 &query,
                 item_type.as_deref(),
@@ -201,6 +216,7 @@ impl SimplePluginCommand for Search {
                 fetch_mode,
                 media_type.as_deref(),
                 mal_username.as_deref(),
+                anilist_username.as_deref(),
                 nsfw,
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
@@ -221,6 +237,7 @@ async fn run_search(
     fetch_mode: FetchMode,
     media_type: Option<&str>,
     mal_username: Option<&str>,
+    anilist_username: Option<&str>,
     nsfw: bool,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
@@ -276,6 +293,7 @@ async fn run_search(
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
         mal_username: mal_username.map(|s| s.to_string()),
+        anilist_username: anilist_username.map(|s|s.to_string()),
         nsfw,
     };
 

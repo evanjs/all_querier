@@ -29,13 +29,17 @@ pub async fn create_provider_cache(name: &str) -> anyhow::Result<ProviderCache> 
         .with_capacity(PROVIDER_DISK_CACHE_CAPACITY_BYTES)
         .build()?;
 
+    let engine_config = BlockEngineConfig::new(device)
+        .with_flushers(1)
+        .with_tombstone_log(false);
+
     let cache = HybridCacheBuilder::new()
         .with_name(format!("allq {name} cache"))
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(PROVIDER_MEMORY_CACHE_CAPACITY)
         .storage()
         .with_recover_mode(RecoverMode::Quiet)
-        .with_engine_config(BlockEngineConfig::new(device).with_tombstone_log(true))
+        .with_engine_config(engine_config)
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create {name} cache: {}", e))?;
