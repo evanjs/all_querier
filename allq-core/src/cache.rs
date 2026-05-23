@@ -31,14 +31,14 @@ pub async fn create_provider_cache(name: &str) -> anyhow::Result<ProviderCache> 
 
     let engine_config = BlockEngineConfig::new(device)
         .with_flushers(1)
-        .with_tombstone_log(false);
+        .with_tombstone_log(true);
 
     let cache = HybridCacheBuilder::new()
         .with_name(format!("allq {name} cache"))
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(PROVIDER_MEMORY_CACHE_CAPACITY)
         .storage()
-        .with_recover_mode(RecoverMode::Quiet)
+        .with_recover_mode(RecoverMode::Strict)
         .with_engine_config(engine_config)
         .build()
         .await
