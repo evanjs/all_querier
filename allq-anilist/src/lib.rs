@@ -43,7 +43,7 @@ pub fn get_config() -> Result<AniListConfig> {
             };
         },
         Err(e) => {
-            warn!("Failed to retrieve ANILIST_TOKEN from environment: {e}");
+            debug!("Failed to retrieve ANILIST_TOKEN from environment: {e}");
         }
     };
 
@@ -52,10 +52,6 @@ pub fn get_config() -> Result<AniListConfig> {
     let config = if path.exists() {
         let content = fs::read_to_string(&path)?;
         let config: AniListConfig = serde_json::from_str(&content)?;
-        debug!(
-            ?config,
-            "Retrieved AniList configuration from disk"
-        );
         config
     } else {
         AniListConfig {
@@ -450,33 +446,76 @@ impl AniListProvider {
 
         let mut iterating = matches!(first_page_result.page_info, Some(info) if info.has_next_page.unwrap_or(false));
 
+        const ANILIST_RATE_LIMIT_MAX_REQUESTS: usize = 30;
+        const ANILIST_RATE_LIMIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+        const ANILIST_RATE_LIMIT_BUFFER: std::time::Duration = std::time::Duration::from_millis(250);
+
+        let mut request_timestamps = std::collections::VecDeque::new();
+
+        // Count the first page request, which already happened immediately before this block.
+        request_timestamps.push_back(std::time::Instant::now());
+
         // if total items in the list does not exceed the user-defined limit (or default limit)
         // then attempt to iterate the list further
-            while iterating {
-                if Some(processed_items) < effective_limit {
-                    info!("Processed items ({}) does not exceed that of effective limit ({:?}). Continuing ...", processed_items, effective_limit);
-                    page_number += 1;
-                    // then second page and onward if needed
-                    let next_page = Self::process_user_medialist_page(
-                        itype,
-                        &mut results,
-                        username,
-                        &medialist,
-                        effective_limit,
-                        Some(page_number),
-                        status
-                    ).await?;
+        while iterating {
+            if Some(processed_items) < effective_limit {
+                info!("Processed items ({}) does not exceed that of effective limit ({:?}). Continuing ...", processed_items, effective_limit);
+                page_number += 1;
 
-                    let more_items = next_page.data.len() as i32;
-                    processed_items += more_items;
+                loop {
+                    let now = std::time::Instant::now();
 
-                    iterating = matches!(next_page.page_info, Some(info) if info.has_next_page.unwrap_or(false));
-                } else {
-                    // if we have exceeded the limit, short circuit and return
-                    warn!("Processed items ({}) exceeds that of effective limit ({:?}). Short circuiting ...", processed_items, effective_limit);
-                    break
+                    while request_timestamps
+                        .front()
+                        .is_some_and(|timestamp| now.duration_since(*timestamp) >= ANILIST_RATE_LIMIT_WINDOW)
+                    {
+                        request_timestamps.pop_front();
+                    }
+
+                    if request_timestamps.len() < ANILIST_RATE_LIMIT_MAX_REQUESTS {
+                        request_timestamps.push_back(now);
+                        break;
+                    }
+
+                    let oldest_request = *request_timestamps
+                        .front()
+                        .expect("rate-limit queue should not be empty when limit is reached");
+
+                    let sleep_for = ANILIST_RATE_LIMIT_WINDOW
+                        .saturating_sub(now.duration_since(oldest_request))
+                        + ANILIST_RATE_LIMIT_BUFFER;
+
+                    warn!(
+                            "AniList API rolling rate limit reached ({}/{} requests). Waiting {:?} before continuing ...",
+                            request_timestamps.len(),
+                            ANILIST_RATE_LIMIT_MAX_REQUESTS,
+                            sleep_for
+                        );
+
+                    tokio::time::sleep(sleep_for).await;
                 }
+
+                // then second page and onward if needed
+                let next_page = Self::process_user_medialist_page(
+                    itype,
+                    &mut results,
+                    username,
+                    &medialist,
+                    effective_limit,
+                    Some(page_number),
+                    status,
+                ).await?;
+
+                let more_items = next_page.data.len() as i32;
+                processed_items += more_items;
+
+                iterating = matches!(next_page.page_info, Some(info) if info.has_next_page.unwrap_or(false));
+            } else {
+                // if we have exceeded the limit, short circuit and return
+                warn!("Processed items ({}) exceeds that of effective limit ({:?}). Short circuiting ...", processed_items, effective_limit);
+                break
             }
+        }
         Ok(())
     }
 
@@ -589,11 +628,17 @@ impl SearchProvider for AniListProvider {
         // When a media_type filter is active we need to over-fetch from the API
         // so that we still return `limit` results after the post-filter step.
         // MAL catalog search caps at 100 per page; user list endpoints support up to 1000.
-        let api_limit: u32 = if options.media_type.is_some() {
-            100
-        } else {
-            limit.min(100)
+        let api_limit = match itype {
+            "animelist" | "mangalist" => 1000,
+            _ => {
+                if options.media_type.is_some() {
+                    100
+                } else {
+                    limit.min(100)
+                }
+            }
         };
+
         let mut results = Vec::new();
 
         const ANIME_FIELDS: &[&str] = &[
@@ -630,6 +675,12 @@ impl SearchProvider for AniListProvider {
             let results: Vec<SearchResult> = serde_json::from_value(value)
                 .context("failed to convert cached AniList search results")?;
             return Ok(results);
+        } else {
+            warn!(
+                ?search_cache_key,
+                ?fetch_mode,
+                "Failed to find item in cache"
+            );
         }
 
         if fetch_mode == FetchMode::CacheOnly {
@@ -679,6 +730,10 @@ impl SearchProvider for AniListProvider {
 
         // Cache the assembled result list
         if let Ok(json) = serde_json::to_string(&result) {
+            trace!(
+                ?search_cache_key,
+                "Inserting item into cache"
+            );
             self.cache_insert(search_cache_key, json, fetch_mode).await;
         }
 
