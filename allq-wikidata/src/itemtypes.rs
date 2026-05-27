@@ -107,6 +107,12 @@ curated_wikidata_item_types! {
         label: "character",
         description: "fictional human or non-human character in a narrative work of art",
     },
+    {
+        key: "taxon",
+        qid: "Q16521",
+        label: "taxonomic unit",
+        description: "group of one or more organism(s), which a taxonomist adjudges to be a unit"
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,6 +6,7 @@ use serde_json::Value;
 pub mod mywaifulist;
 pub mod pcgw;
 pub mod mal;
+pub mod itis;
 
 pub fn app_user_agent() -> String {
     let authors = env!("CARGO_PKG_AUTHORS");
@@ -178,6 +179,14 @@ supported_provider_links! {
         supported_item_types: ["anime", "manga"],
         description: "Fetch MyAnimeList anime page data",
     },
+    {
+        primary_alias: "taxon",
+        aliases: itis::LINK_ALIASES,
+        source: "itis",
+        property_id: "P225",
+        supported_item_types: [ "taxon" ],
+        description: "Fetch taxonomy data from itis.gov"
+    }
 }
 
 pub fn supported_provider_links() -> &'static [SupportedProviderLink] {

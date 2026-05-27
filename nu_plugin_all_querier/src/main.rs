@@ -68,7 +68,7 @@ pub fn init_logging(verbose: bool) -> anyhow::Result<()> {
         EnvFilter::try_new(rust_log)?
     } else if verbose {
         EnvFilter::try_new(
-            "warn,allq_query=debug,allq_providers=debug,allq_wikidata=debug,allq_core=debug,allq_mal=debug,allq_pcgw=debug,allq_musicbrainz=debug,allq_jikan=debug,allq_anilist=debug,reqwest=debug,nu_plugin_all_querier=debug"
+            "warn,allq_query=debug,allq_providers=debug,allq_wikidata=debug,allq_core=debug,allq_mal=debug,allq_pcgw=debug,allq_musicbrainz=debug,allq_jikan=debug,allq_anilist=debug,allq_itis=debug,reqwest=debug,nu_plugin_all_querier=debug"
         )?
     } else {
         EnvFilter::try_new("warn")?
