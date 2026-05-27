@@ -1,10 +1,11 @@
 pub mod cache;
 pub mod dispatcher;
 
+use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-pub use cache::{ProviderCache, all_querier_data_dir, create_provider_cache};
+pub use cache::{ProviderCache, all_querier_cache_dir, create_provider_cache};
 pub use dispatcher::SearchDispatcher;
 
 /// Controls how a provider resolves requests relative to its local cache.
@@ -84,4 +85,15 @@ pub trait SearchProvider: Send + Sync {
         item_type: Option<&str>,
         options: &SearchOptions,
     ) -> anyhow::Result<Vec<SearchResult>>;
+}
+
+pub fn all_querier_data_dir() -> Option<PathBuf> {
+    match dirs::data_dir() {
+        None => {
+            None
+        }
+        Some(p) => {
+            Some(p.join("all_querier"))
+        }
+    }
 }
