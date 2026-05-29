@@ -112,6 +112,90 @@ curated_wikidata_item_types! {
         qid: "Q16521",
         label: "taxonomic unit",
         description: "group of one or more organism(s), which a taxonomist adjudges to be a unit"
+    },
+    {
+        key: "television-series-episode",
+        qid: "Q21191270",
+        label: "television series episode",
+        description: "single installment of a television series"
+    },
+    {
+        key: "dog-breed",
+        qid: "Q39367",
+        label: "dog breed",
+        description: "group of closely related and visibly similar domestic dogs"
+    },
+    {
+        key: "cat-breed",
+        qid: "Q43577",
+        label: "cat breed",
+        description: "type of pet breed"
+    },
+    {
+        key: "breed",
+        qid: "Q38829",
+        label: "breed",
+        description: "group of domestic animals with a distinctive phenotype"
+    },
+    {
+        key: "video-game-developer",
+        qid: "Q210167",
+        label: "video game developer",
+        description: "software development organization specializing in the creation of video games (for person use Q58287519)"
+    },
+    {
+        key: "video-game-publisher",
+        qid: "Q1137109",
+        label: "video game publisher",
+        description: "company that publishes video games"
+    },
+    {
+        key: "video-game-console",
+        qid: "Q8076",
+        label: "video game console",
+        description: "dedicated electronic device designed primarily for playing video games, typically connected to a display"
+    },
+    {
+        key: "human",
+        qid: "Q5",
+        label: "human",
+        description: "any single member of Homo sapiens, unique extant species of the genus Homo"
+    },
+    {
+        key: "musical-group",
+        qid: "Q215380",
+        label: "musical group",
+        description: "musical ensemble which performs music"
+    },
+    {
+        key: "programming-language",
+        qid: "Q9143",
+        label: "programming language",
+        description: "language for communicating instructions to a machine"
+    },
+    {
+        key: "large-language-model",
+        qid: "Q115305900",
+        label: "large language model",
+        description: "language model built with very large amounts of texts"
+    },
+    {
+        key: "language",
+        qid: "Q34770",
+        label: "language",
+        description: "particular system of communication, often named for the region or peoples that use it",
+    },
+    {
+        key: "television-series-season",
+        qid: "Q3464665",
+        label: "television series season",
+        description: "set of episodes produced for a television series"
+    },
+    {
+        key: "television-series-episode",
+        qid: "Q21191270",
+        label: "television series episode",
+        description: "single installment of a television series"
     }
 }
 
