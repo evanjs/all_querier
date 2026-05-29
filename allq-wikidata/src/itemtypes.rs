@@ -430,8 +430,14 @@ fn search_items_by_instance_of_query(
     include_subclasses: bool,
 ) -> String {
     let escaped_query = sparql_string_escape(query);
-    let instance_filter = if include_subclasses {
-        format!("?item wdt:P31/wdt:P279* wd:{type_qid} .")
+    let type_filter = if include_subclasses {
+        format!(
+            r#"FILTER(
+    ?item = wd:{type_qid} ||
+    EXISTS {{ ?item wdt:P31/wdt:P279* wd:{type_qid} }} ||
+    EXISTS {{ ?item wdt:P279* wd:{type_qid} }}
+  )"#
+        )
     } else {
         format!("?item wdt:P31 wd:{type_qid} .")
     };
@@ -448,7 +454,7 @@ SELECT DISTINCT ?item ?itemLabel ?itemDescription WHERE {{
     ?item wikibase:apiOutputItem mwapi:item .
   }}
 
-  {instance_filter}
+  {type_filter}
 
   SERVICE wikibase:label {{
     bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en" .
@@ -563,7 +569,7 @@ fn search_items_by_instance_of_cache_key(
     });
 
     Ok(format!(
-        "search_items_by_instance_of:v1:{}",
+        "search_items_by_instance_of:v2:{}",
         serde_json::to_string(&key_data)?
     ))
 }
