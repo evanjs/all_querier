@@ -5,6 +5,7 @@ pub use fetch_args::{add_fetch_flags, read_fetch_args};
 
 use std::collections::HashMap;
 use std::time::Instant;
+use anyhow::Context;
 use allq_providers::{
     ExternalIdPageProvider,
     ProviderHttpClient,
@@ -16,13 +17,15 @@ use serde_json::{
     Value,
 };
 use tracing::debug;
+use allq_wikidata::{curated_wikidata_item_types, CURATED_WIKIDATA_ITEM_TYPES};
 
+#[derive(Debug)]
 pub struct WikidataQueryOptions<'a> {
     pub item_type: Option<&'a str>,
     pub type_qid: Option<&'a str>,
     pub query: &'a str,
     pub link: Option<&'a str>,
-    pub limit: usize,
+    pub limit: Option<usize>,
     pub candidate_limit: Option<usize>,
     pub cache_only: bool,
     pub force_fetch: bool,
@@ -65,11 +68,17 @@ pub async fn query_wikidata(
 
     let search_started_at = Instant::now();
 
-    let rows = allq_wikidata::search_items_by_instance_of_with_options(
+    debug!(
+        ?type_qid,
+        ?search_started_at,
+        ?options,
+    );
+
+    let mut rows = allq_wikidata::search_items_by_instance_of_with_options(
         &type_qid,
         options.query,
         allq_wikidata::SearchItemsByInstanceOfOptions {
-            output_limit: Some(options.limit),
+            output_limit: options.limit,
             candidate_limit: options.candidate_limit,
             include_subclasses: !options.direct_only,
             debug_query: options.debug_query,
@@ -78,6 +87,44 @@ pub async fn query_wikidata(
         },
     )
         .await?;
+
+    let mut television_season_expansion_rows = None;
+    use allq_wikidata::{TELEVISION_SERIES_QID, TELEVISION_SERIES_SEASON_QID, FRANCHISE};
+    match type_qid.as_str() {
+        FRANCHISE
+        | TELEVISION_SERIES_QID
+        | TELEVISION_SERIES_SEASON_QID
+        => {
+            if options.debug_query {
+                eprintln!(
+                    "debug: trying tv-series-to-seasons expansion for compatible type"
+                );
+            }
+
+            let expansion_rows =
+                allq_wikidata::search_television_series_seasons_by_series_query_with_options(
+                    options.query,
+                    allq_wikidata::SearchItemsByInstanceOfOptions {
+                        output_limit: Some(options.limit.unwrap_or(50)),
+                        candidate_limit: options.candidate_limit,
+                        include_subclasses: true,
+                        debug_query: options.debug_query,
+                        cache_only: options.cache_only,
+                        force_fetch: options.force_fetch,
+                    },
+                )
+                    .await?;
+
+            rows = expansion_rows
+                .iter()
+                .map(allq_wikidata::WikidataTelevisionSeasonSearchResult::as_item_search_result)
+                .collect();
+
+            television_season_expansion_rows = Some(expansion_rows);
+        },
+        // No special behavior required for other types
+        _ => {}
+    }
 
     if options.debug_query {
         eprintln!("debug: search-item elapsed={:?}", search_started_at.elapsed());
@@ -109,6 +156,10 @@ pub async fn query_wikidata(
 
     let hydration_started_at = Instant::now();
     let mut entities = hydrate_search_item_entities(&client, &rows, lookup_mode).await?;
+
+    if let Some(expansion_rows) = television_season_expansion_rows.as_deref() {
+        attach_television_season_expansion_metadata(&mut entities, expansion_rows);
+    }
 
     if options.debug_query {
         eprintln!("debug: hydration elapsed={:?}", hydration_started_at.elapsed());
@@ -228,6 +279,52 @@ pub async fn hydrate_search_item_entities(
                 .ok_or_else(|| anyhow::anyhow!("Wikidata entity response did not include {}", row.id))
         })
         .collect()
+}
+
+fn expansion_output_limit(limit: usize) -> usize {
+    if limit == 1 {
+        50
+    } else {
+        limit
+    }
+}
+
+fn attach_television_season_expansion_metadata(
+    entities: &mut [Value],
+    rows: &[allq_wikidata::WikidataTelevisionSeasonSearchResult],
+) {
+    let rows_by_id = rows
+        .iter()
+        .map(|row| (row.id.as_str(), row))
+        .collect::<HashMap<_, _>>();
+
+    for entity in entities {
+        let Some(id) = entity
+            .get("id")
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+
+        let Some(row) = rows_by_id.get(id) else {
+            continue;
+        };
+
+        let metadata = serde_json::json!({
+            "expansionRoute": "tv-series-to-seasons",
+            "lens": "television-series-season-summary",
+            "series": {
+                "id": row.series.id,
+                "label": row.series.label,
+            },
+            "ordinal": row.ordinal,
+            "episodeCount": row.episode_count,
+        });
+
+        if let Some(object) = entity.as_object_mut() {
+            object.insert("allq".to_string(), metadata);
+        }
+    }
 }
 
 pub async fn follow_search_item_link(

@@ -91,8 +91,8 @@ enum Command {
         link: Option<String>,
 
         /// Maximum number of output results, clamped to 1..=50
-        #[arg(short = 'n', long, default_value_t = 1)]
-        limit: usize,
+        #[arg(short = 'n', long)]
+        limit: Option<usize>,
 
         /// Number of raw Wikidata text-search candidates to inspect before type filtering
         #[arg(long)]

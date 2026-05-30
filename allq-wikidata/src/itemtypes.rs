@@ -5,7 +5,14 @@ use serde::{
 };
 use serde_json::Value;
 
-use crate::WikidataClient;
+use crate::{
+    normalize_search_query,
+    optional_binding_value,
+    required_binding_value,
+    sparql_string_escape,
+    url_fragment_escape,
+    WikidataClient
+};
 
 const DEFAULT_SEARCH_LIMIT: usize = 1;
 const DEFAULT_CANDIDATE_LIMIT: usize = 20;
@@ -196,6 +203,12 @@ curated_wikidata_item_types! {
         qid: "Q21191270",
         label: "television series episode",
         description: "single installment of a television series"
+    },
+    {
+        key: "franchise",
+        qid: "Q196600",
+        label: "franchise",
+        description: "use of a creative work across several different media",
     }
 }
 
@@ -496,21 +509,6 @@ fn parse_item_search_result(binding: &Value) -> anyhow::Result<WikidataItemSearc
     })
 }
 
-fn required_binding_value<'a>(binding: &'a Value, key: &str) -> anyhow::Result<&'a str> {
-    binding
-        .get(key)
-        .and_then(|value| value.get("value"))
-        .and_then(Value::as_str)
-        .with_context(|| format!("SPARQL row is missing binding value: {key}"))
-}
-
-fn optional_binding_value<'a>(binding: &'a Value, key: &str) -> Option<&'a str> {
-    binding
-        .get(key)
-        .and_then(|value| value.get("value"))
-        .and_then(Value::as_str)
-}
-
 fn item_uri_to_qid(uri: &str) -> anyhow::Result<String> {
     let id = uri
         .rsplit('/')
@@ -532,13 +530,7 @@ fn normalize_item_qid(qid: &str) -> anyhow::Result<String> {
     Ok(qid.to_string())
 }
 
-fn normalize_search_query(query: &str) -> anyhow::Result<&str> {
-    let query = query.trim();
 
-    anyhow::ensure!(!query.is_empty(), "search query cannot be empty");
-
-    Ok(query)
-}
 
 fn normalize_limit(limit: Option<usize>) -> usize {
     limit
@@ -572,41 +564,4 @@ fn search_items_by_instance_of_cache_key(
         "search_items_by_instance_of:v2:{}",
         serde_json::to_string(&key_data)?
     ))
-}
-
-fn url_fragment_escape(value: &str) -> String {
-    let mut escaped = String::new();
-
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~' => escaped.push(byte as char),
-            b' ' => escaped.push_str("%20"),
-            b'\n' => escaped.push_str("%0A"),
-            b'\r' => escaped.push_str("%0D"),
-            b'\t' => escaped.push_str("%09"),
-            _ => escaped.push_str(&format!("%{byte:02X}")),
-        }
-    }
-
-    escaped
-}
-
-fn sparql_string_escape(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|ch| match ch {
-            '\\' => "\\\\".chars().collect::<Vec<_>>(),
-            '"' => "\\\"".chars().collect::<Vec<_>>(),
-            '\n' => "\\n".chars().collect::<Vec<_>>(),
-            '\r' => "\\r".chars().collect::<Vec<_>>(),
-            '\t' => "\\t".chars().collect::<Vec<_>>(),
-            _ => vec![ch],
-        })
-        .collect()
 }

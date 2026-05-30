@@ -94,8 +94,7 @@ impl SimplePluginCommand for QueryWikidata {
         let link: Option<String> = call.get_flag("link")?;
         let limit = call
             .get_flag::<i64>("limit")?
-            .and_then(|limit| usize::try_from(limit).ok())
-            .unwrap_or(1);
+            .and_then(|limit| usize::try_from(limit).ok());
 
         let fetch = read_fetch_args(call).map_err(|e| e)?;
         let external_links = call.has_flag("external-links")?;
@@ -134,7 +133,7 @@ async fn run_query_wikidata(
     item_type: &str,
     query: &str,
     link: Option<&str>,
-    limit: usize,
+    limit: Option<usize>,
     fetch: FetchArgs,
     external_links: bool,
     verbose: bool,
@@ -144,7 +143,8 @@ async fn run_query_wikidata(
         type_qid: None,
         query,
         link,
-        limit,
+        limit, // don't set an explicit limit, as something else might set it conditionally
+        // e.g. an expanded limit for series -> tv season queries, etc.
         candidate_limit: None,
         cache_only: fetch.cache_only,
         force_fetch: fetch.force_fetch,
