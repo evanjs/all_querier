@@ -260,16 +260,35 @@ impl SearchProvider for JikanProvider {
                 //  for now, simply call `get_character_full_by_id` if the user
                 //  explicitly requests a single result
 
+                let left = character_results.as_ref().expect_left("Failed to unwrap character results from Jikan");
+
                 // if the user only requests one result,
-                if options.limit == Some(1) {
-                    let left = character_results.unwrap_left();
+                //   OR the search only returned a single character
+                ///  then query jikan for extended info
+                if options.limit == Some(1) || left.data.len() == 1 {
                     let id = left.data.first().unwrap().mal_id;
-                    let data = self.client.get_character_full_by_id(id).await?;
-                    character_results = Right(data);
+                    debug!("Fetching full character data for ID: {id}");
+                    match self.client.get_character_full_by_id(id).await {
+                        Ok(character_extended) => {
+                            character_results = Right(character_extended);
+                        }
+                        Err(e) => {
+                            error!(
+                                error =? e,
+                                ?id,
+                                "Failed to retrieve extended character data"
+                            );
+                            // Don't do anything else, the initial Left(Character) value will be returned
+                        }
+                    };
                 }
 
                 match character_results {
                     Left(characters) => {
+                        debug!(
+                            ?characters,
+                            "Parsing Character result"
+                        );
                         for node in characters.data {
                             results.push(SearchResult {
                                 label: node.name.clone(),
@@ -296,6 +315,10 @@ impl SearchProvider for JikanProvider {
                         results.truncate(limit as usize);
                     }
                     Right(character) => {
+                        debug!(
+                            ?character,
+                            "Parsing CharacterExtended result"
+                        );
                         let node = character.data.clone();
                             results.push(SearchResult {
                                 label: node.name.clone(),
