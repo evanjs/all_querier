@@ -124,6 +124,7 @@ dependencies = [
  "allq-core",
  "anyhow",
  "async-trait",
+ "either",
  "jikan_moe",
  "reqwest 0.12.28",
  "serde",

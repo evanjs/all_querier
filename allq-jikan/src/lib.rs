@@ -1,10 +1,12 @@
 use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use either::{Either, IntoEither, Left, Right};
 use jikan_moe::common::response::Response;
 use jikan_moe::common::structs::anime::Anime;
 use jikan_moe::{JikanClient, JikanError};
-use tracing::{debug, error};
+use jikan_moe::common::structs::character::{Character, CharacterExtended};
+use tracing::{debug, error, trace, warn};
 
 pub const SUPPORTED_TYPES: &[&str] = &["anime", "manga", "character"];
 
@@ -107,6 +109,28 @@ impl SearchProvider for JikanProvider {
         //   e.g. force-fetch, cache-only, etc.
         //   This will probably be easier after deduplicating logic shared between
         //   search handlers
+
+        let fetch_mode = options.fetch_mode;
+        let limit = options.limit.clone().unwrap_or(1);
+        let search_cache_key = format!("jikan:search:{itype}:{query}{limit}");
+
+        if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
+            let value: serde_json::Value = serde_json::from_str(&cached)
+                .context("failed to deserialize cached Jikan search results")?;
+            let results: Vec<SearchResult> = serde_json::from_value(value)
+                .context("failed to convert cached Jikan search results")?;
+            return Ok(results);
+        } else {
+            warn!(
+                ?search_cache_key,
+                ?fetch_mode,
+                "Failed to find item in cache"
+            );
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            return Ok(Vec::new());
+        }
 
         debug!(
             ?query,
@@ -217,41 +241,95 @@ impl SearchProvider for JikanProvider {
                 Ok(results)
             },
             "character" => {
-                let character_results = self.client
-                    .get_character_search(
+                let mut character_results: Either<Response<Vec<Character>>, Response<CharacterExtended>> =
+                    Left(self.client.get_character_search(
                         None, // page
                         options.limit, // limit
                         Some(query.into()), // query
                         None, // order_by
                         None, // sort
-                        None // letter
+                        None, // letter
                     )
-                    .await?;
+                    .await?
+                );
 
-                for node in character_results.data {
-                    results.push(SearchResult {
-                        label: node.name.clone(),
-                        id: node.mal_id.to_string(),
-                        item_type: Some(itype.to_string()),
-                        provider: "jikan".to_string(),
-                        description: node.about.clone(),
-                        data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
-                    });
+                // XXX: if only one result, call chararcter/{id}/full
+                //   some characters only have a given or family name
+                //   e.g. "Brook" (One Piece)
+                //  but search can't be forced to return full details
+                //  for now, simply call `get_character_full_by_id` if the user
+                //  explicitly requests a single result
+
+                // if the user only requests one result,
+                if options.limit == Some(1) {
+                    let left = character_results.unwrap_left();
+                    let id = left.data.first().unwrap().mal_id;
+                    let data = self.client.get_character_full_by_id(id).await?;
+                    character_results = Right(data);
                 }
 
-                if let Some(ref mt) = options.media_type {
-                    results.retain(|r| {
-                        r.data
-                            .get("media_type")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.eq_ignore_ascii_case(mt))
-                            .unwrap_or(false)
-                    });
+                match character_results {
+                    Left(characters) => {
+                        for node in characters.data {
+                            results.push(SearchResult {
+                                label: node.name.clone(),
+                                id: node.mal_id.to_string(),
+                                item_type: Some(itype.to_string()),
+                                provider: "jikan".to_string(),
+                                description: node.about.clone(),
+                                data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+                            });
+                        }
+
+                        if let Some(ref mt) = options.media_type {
+                            results.retain(|r| {
+                                r.data
+                                    .get("media_type")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.eq_ignore_ascii_case(mt))
+                                    .unwrap_or(false)
+                            });
+                        }
+
+                        // Apply the user-requested limit after filtering so the final result
+                        // count is correct regardless of how many items were filtered out.
+                        results.truncate(limit as usize);
+                    }
+                    Right(character) => {
+                        let node = character.data.clone();
+                            results.push(SearchResult {
+                                label: node.name.clone(),
+                                id: node.mal_id.to_string(),
+                                item_type: Some(itype.to_string()),
+                                provider: "jikan".to_string(),
+                                description: node.about.clone(),
+                                data: serde_json::to_value(&node).unwrap_or(serde_json::Value::Null),
+                            });
+
+                        if let Some(ref mt) = options.media_type {
+                            results.retain(|r| {
+                                r.data
+                                    .get("media_type")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.eq_ignore_ascii_case(mt))
+                                    .unwrap_or(false)
+                            });
+                        }
+
+                        // Apply the user-requested limit after filtering so the final result
+                        // count is correct regardless of how many items were filtered out.
+                        results.truncate(limit as usize);
+                    }
                 }
 
-                // Apply the user-requested limit after filtering so the final result
-                // count is correct regardless of how many items were filtered out.
-                results.truncate(limit as usize);
+                // insert into cache if valid
+                if let Ok(json) = serde_json::to_string(&results) {
+                    trace!(
+                        ?search_cache_key,
+                        "Inserting item(s) into cache"
+                    );
+                    self.cache_insert(search_cache_key, json, fetch_mode).await;
+                }
 
                 Ok(results)
             },
