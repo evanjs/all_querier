@@ -1,4 +1,4 @@
-use allq_core::{SearchProvider, SearchOptions, SearchResult, all_querier_data_dir};
+use allq_core::{SearchProvider, SearchOptions, SearchResult, all_querier_cache_dir};
 use anyhow::Result;
 use async_trait::async_trait;
 use myanimelist::{MalClient, ClientId};
@@ -40,7 +40,7 @@ pub fn get_client_id() -> Result<String> {
         return Ok(id);
     }
     
-    let path = all_querier_data_dir().join("credentials.json");
+    let path = all_querier_cache_dir().join("credentials.json");
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(config) = serde_json::from_str::<MalConfig>(&content) {
@@ -61,7 +61,7 @@ pub fn get_config() -> Result<MalConfig> {
         });
     }
 
-    let path = all_querier_data_dir().join("credentials.json");
+    let path = all_querier_cache_dir().join("credentials.json");
     if path.exists() {
         let content = fs::read_to_string(&path)?;
         let config: MalConfig = serde_json::from_str(&content)?;

@@ -2,7 +2,7 @@ mod oauth2;
 
 use std::{env, fs};
 use std::num::ParseIntError;
-use allq_core::{all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
+use allq_core::{all_querier_cache_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::{anyhow, Context, Error, Result};
 use async_trait::async_trait;
 use tracing::{debug, error, info, trace, warn};
@@ -48,7 +48,7 @@ pub fn get_config() -> Result<AniListConfig> {
     };
 
     trace!("Attempting to parse AniList configuration file");
-    let path = all_querier_data_dir().join("anilist_config.json");
+    let path = all_querier_cache_dir().join("anilist_config.json");
     let config = if path.exists() {
         let content = fs::read_to_string(&path)?;
         let config: AniListConfig = serde_json::from_str(&content)?;
