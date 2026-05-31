@@ -10,6 +10,7 @@ members = [
     "allq-pcgw",
     "allq-providers",
     "allq-query",
+    "allq-rawg",
     "allq-wikidata",
     "nu_plugin_all_querier",
 ]
@@ -41,6 +42,9 @@ path = "./allq-providers"
 
 [workspace.dependencies.allq-query]
 path = "./allq-query"
+
+[workspace.dependencies.allq-rawg]
+path = "./allq-rawg"
 
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"
