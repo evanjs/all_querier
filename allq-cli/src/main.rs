@@ -517,6 +517,17 @@ async fn run_search(
         }
     }
 
+    if should_add("rawg") {
+        match allq_rawg::RawgProvider::new() {
+            Ok(rawg_provider) => {
+                dispatcher.add_provider(Box::new(rawg_provider));
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize RAWG provider: {e}");
+            }
+        }
+    }
+
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
             "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw, myanimelist",
