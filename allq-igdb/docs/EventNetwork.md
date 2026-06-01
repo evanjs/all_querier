@@ -1,0 +1,17 @@
+# EventNetwork
+
+## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**id** | Option<**i32**> | The IGDB object unique identifier | [optional]
+**event** | Option<**i32**> | The IGDB object unique identifier | [optional]
+**url** | Option<**String**> | The website address (URL) of the item | [optional]
+**network_type** | Option<**i32**> | The IGDB object unique identifier | [optional]
+**created_at** | Option<**i64**> | Date this was initially added to the IGDB database | [optional]
+**updated_at** | Option<**i64**> | The last date this entry was updated in the IGDB database | [optional]
+**checksum** | Option<**uuid::Uuid**> | Hash of the object | [optional]
+
+[[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -1,0 +1,21 @@
+[package]
+name = "allq-igdb"
+version = "0.1.0+4.0.0"
+authors = ["Evan Stoll <evanjsx@gmail.com>"]
+description = "This OpenAPI documentation and schema project IS IN BETA and maintained by [s-crypt.](https://github.com/s-crypt)  The source code and more information is [available in the GitHub repository](https://github.com/s-crypt/IGDB-OpenAPI)  Issues and pull requests are welcome! Please report any bugs or discrepancies you come across! "
+license = "Twitch Developer Services Agreement"
+edition = "2024"
+
+[dependencies]
+serde = { version = "^1.0", features = ["derive"] }
+serde_with = { version = "^3.8", default-features = false, features = ["base64", "std", "macros"] }
+serde_json = "^1.0"
+serde_repr = "^0.1"
+url = "^2.5"
+uuid = { version = "^1.8", features = ["serde", "v4"] }
+reqwest = { version = "^0.13", default-features = false, features = ["json", "multipart", "query", "form"] }
+
+[features]
+default = ["native-tls"]
+native-tls = ["reqwest/native-tls"]
+rustls = ["reqwest/rustls"]
