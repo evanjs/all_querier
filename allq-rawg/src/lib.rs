@@ -8,12 +8,14 @@ extern crate url;
 extern crate reqwest;
 
 use std::{env, fs};
-use anyhow::Result;
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{debug, trace};
-use allq_core::{all_querier_cache_dir, all_querier_data_dir, SearchOptions, SearchProvider, SearchResult};
+use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use crate::apis::configuration::Configuration;
 
 pub mod apis;
@@ -27,6 +29,7 @@ pub(crate) const LINK_ALIASES: &[&str] = &[
 /// A `SearchProvider` backed by the RawgProvider API.
 pub struct RawgProvider {
     client: reqwest::Client,
+    cache: Option<ProviderCache>,
 }
 
 fn user_agent() -> String {
@@ -43,7 +46,36 @@ impl RawgProvider {
             .user_agent(user_agent())
             .build()?;
 
-        Ok(Self { client })
+        Ok(Self { client, cache: None })
+    }
+
+
+    /// Create a new provider with the given user-agent string and a foyer hybrid cache.
+    pub fn new_with_cache(cache: ProviderCache) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .user_agent(user_agent())
+            .build()?;
+
+        Ok(Self { client, cache: Some(cache) })
+    }
+
+    /// Look up a cached JSON string for `key`, respecting `fetch_mode`.
+    async fn cache_get(&self, key: &str, fetch_mode: FetchMode) -> Option<String> {
+        if fetch_mode == FetchMode::ForceFetch {
+            return None;
+        }
+        let cache = self.cache.as_ref()?;
+        cache.get(key).await.ok().flatten().map(|e| e.value().clone())
+    }
+
+    /// Insert `value` into the cache under `key` unless in `CacheOnly` mode.
+    async fn cache_insert(&self, key: String, value: String, fetch_mode: FetchMode) {
+        if fetch_mode == FetchMode::CacheOnly {
+            return;
+        }
+        if let Some(cache) = &self.cache {
+            cache.insert(key, value);
+        }
     }
 }
 
@@ -78,6 +110,10 @@ impl SearchProvider for RawgProvider {
         "rawg"
     }
 
+    fn supported_item_types(&self) -> &[&str] {
+        SUPPORTED_TYPES
+    }
+
     async fn search(
         &self,
         query: &str,
@@ -94,7 +130,23 @@ impl SearchProvider for RawgProvider {
             "Searching RAWG"
         );
 
+        let fetch_mode = options.fetch_mode;
         let config = get_config()?;
+        let search_cache_key = format!("rawg:search:{itype}:{query}:{limit}");
+
+        // Try to serve the full result list from cache.
+        if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
+            let value: serde_json::Value = serde_json::from_str(&cached)
+                .context("failed to deserialize cached RAWG search results")?;
+            let results: Vec<SearchResult> = serde_json::from_value(value)
+                .context("failed to convert cached RAWG search results")?;
+            return Ok(results);
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            return Ok(Vec::new());
+        }
+
         let results = match config.rawg_api_key {
             Some(api_key) => {
                 let rawg_config = &Configuration {
@@ -158,10 +210,11 @@ impl SearchProvider for RawgProvider {
             }
         }).collect::<Vec<_>>();
 
-        Ok(search_results)
-    }
+        // Cache the assembled result list.
+        if let Ok(json) = serde_json::to_string(&search_results) {
+            self.cache_insert(search_cache_key, json, fetch_mode).await;
+        }
 
-    fn supported_item_types(&self) -> &[&str] {
-        SUPPORTED_TYPES
+        Ok(search_results)
     }
 }

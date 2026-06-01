@@ -304,7 +304,8 @@ async fn run_search(
     }
 
     if should_add("rawg") {
-        match RawgProvider::new() {
+        let cache = allq_core::create_provider_cache("rawg").await?;
+        match RawgProvider::new_with_cache(cache) {
             Ok(rawg_provider) => {
                 dispatcher.add_provider(Box::new(rawg_provider));
             },

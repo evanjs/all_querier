@@ -79,6 +79,7 @@ dependencies = [
  "allq-pcgw",
  "allq-providers",
  "allq-query",
+ "allq-rawg",
  "allq-wikidata",
  "anyhow",
  "clap",
@@ -209,8 +210,11 @@ dependencies = [
 
 [[package]]
 name = "allq-rawg"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
+ "allq-core",
+ "anyhow",
+ "async-trait",
  "chrono",
  "reqwest 0.13.3",
  "serde",
@@ -3289,6 +3293,7 @@ dependencies = [
  "allq-pcgw",
  "allq-providers",
  "allq-query",
+ "allq-rawg",
  "allq-wikidata",
  "anyhow",
  "dotenvy",
