@@ -34,7 +34,7 @@ pub struct Game {
     #[serde(rename = "ratings_count", skip_serializing_if = "Option::is_none")]
     pub ratings_count: Option<i32>,
     #[serde(rename = "reviews_text_count", skip_serializing_if = "Option::is_none")]
-    pub reviews_text_count: Option<String>,
+    pub reviews_text_count: Option<i32>,
     #[serde(rename = "added", skip_serializing_if = "Option::is_none")]
     pub added: Option<i32>,
     #[serde(rename = "added_by_status", skip_serializing_if = "Option::is_none")]
@@ -47,7 +47,7 @@ pub struct Game {
     #[serde(rename = "suggestions_count", skip_serializing_if = "Option::is_none")]
     pub suggestions_count: Option<i32>,
     #[serde(rename = "updated", skip_serializing_if = "Option::is_none")]
-    pub updated: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub updated: Option<chrono::NaiveDateTime>,
     #[serde(rename = "esrb_rating", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub esrb_rating: Option<Option<Box<models::GameEsrbRating>>>,
     #[serde(rename = "platforms", skip_serializing_if = "Option::is_none")]

@@ -315,6 +315,11 @@ pub async fn games_list(configuration: &configuration::Configuration, page: Opti
     let uri_str = format!("{}/games", configuration.base_path);
     let mut req_builder = configuration.client.request(reqwest::Method::GET, &uri_str);
 
+    // Inject API key into query if present
+    if let Some(ref param_value) = configuration.api_key {
+        req_builder = req_builder.query(&[("key", &param_value.key.to_string())]);
+    }
+
     if let Some(ref param_value) = p_query_page {
         req_builder = req_builder.query(&[("page", &param_value.to_string())]);
     }
