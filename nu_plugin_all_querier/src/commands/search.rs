@@ -13,6 +13,7 @@ use allq_query::{add_fetch_flags, read_fetch_args};
 use allq_mal::{MAL_MEDIA_TYPES, SUPPORTED_TYPES as MAL_SUPPORTED_TYPES};
 use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
+use allq_rawg::{RawgProvider, SUPPORTED_TYPES as RAWG_SUPPORTED_TYPES};
 use allq_itis::{ItisProvider, SUPPORTED_TYPES as ITIS_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
 
@@ -29,7 +30,7 @@ fn runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
 }
 
 /// Static list of provider names supported by the `search` command.
-pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist", "jikan", "anilist", "itis"];
+pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist", "jikan", "anilist", "itis", "rawg"];
 
 /// Returns the union of item types supported across all search providers,
 /// suitable for use as completion candidates for the `--type` flag.
@@ -63,6 +64,11 @@ fn search_item_type_completions() -> &'static [&'static str] {
             }
         }
         for &t in ITIS_SUPPORTED_TYPES {
+            if !types.contains(&t) {
+                types.push(t);
+            }
+        }
+        for &t in RAWG_SUPPORTED_TYPES {
             if !types.contains(&t) {
                 types.push(t);
             }
@@ -293,6 +299,18 @@ async fn run_search(
             }
             Err(e) => {
                 debug!("Failed to initialize ITIS provider, skipping: {}", e);
+            }
+        }
+    }
+
+    if should_add("rawg") {
+        let cache = allq_core::create_provider_cache("rawg").await?;
+        match RawgProvider::new_with_cache(cache) {
+            Ok(rawg_provider) => {
+                dispatcher.add_provider(Box::new(rawg_provider));
+            },
+            Err(e) => {
+                debug!("Failed to initialize RAWG provider, skipping: {}", e);
             }
         }
     }

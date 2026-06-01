@@ -8,7 +8,7 @@ pub type ProviderCache = HybridCache<String, String>;
 
 const PROVIDER_CACHE_SCHEMA_VERSION: &str = "v1";
 const PROVIDER_MEMORY_CACHE_CAPACITY: usize = 32 * 1024 * 1024;
-const PROVIDER_DISK_CACHE_CAPACITY_BYTES: usize = 256 * 1024 * 1024;
+const PROVIDER_DISK_CACHE_CAPACITY_BYTES: usize = 128 * 1024 * 1024;
 
 pub fn all_querier_cache_dir() -> PathBuf {
     all_querier_data_dir()
