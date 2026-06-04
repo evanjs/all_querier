@@ -1,7 +1,5 @@
 .gitignore
-.openapi-generator-ignore
 .travis.yml
-Cargo.toml
 README.md
 docs/AgeRating.md
 docs/AgeRatingCategory.md
@@ -105,7 +103,6 @@ git_push.sh
 src/apis/configuration.rs
 src/apis/endpoints_api.rs
 src/apis/mod.rs
-src/lib.rs
 src/models/age_rating.rs
 src/models/age_rating_category.rs
 src/models/age_rating_category_enums.rs

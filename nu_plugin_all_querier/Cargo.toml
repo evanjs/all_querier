@@ -18,6 +18,7 @@ nu-plugin = "0.112.2"
 nu-protocol = { version = "0.112.2", features = ["plugin"] }
 allq-anilist.workspace = true
 allq-core.workspace = true
+allq-igdb.workspace = true
 allq-itis.workspace = true
 allq-jikan.workspace = true
 allq-musicbrainz.workspace = true

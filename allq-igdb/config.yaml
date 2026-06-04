@@ -1,0 +1,8 @@
+reservedWordsMappings:
+  id: IGDBId
+  mod: GameMod
+
+enumNameMappings:
+  mod: GameMod
+
+useSerdePathToError: true

@@ -12,6 +12,7 @@ pub struct ResponseContent<T> {
 pub enum Error<T> {
     Reqwest(reqwest::Error),
     Serde(serde_json::Error),
+    SerdePathToError(serde_path_to_error::Error<serde_json::Error>),
     Io(std::io::Error),
     ResponseError(ResponseContent<T>),
 }
@@ -21,6 +22,7 @@ impl <T> fmt::Display for Error<T> {
         let (module, e) = match self {
             Error::Reqwest(e) => ("reqwest", e.to_string()),
             Error::Serde(e) => ("serde", e.to_string()),
+            Error::SerdePathToError(e) => ("serde", format!("{}: {}", e.path().to_string(), e.inner().to_string())),
             Error::Io(e) => ("IO", e.to_string()),
             Error::ResponseError(e) => ("response", format!("status code {}", e.status)),
         };
@@ -33,6 +35,7 @@ impl <T: fmt::Debug> error::Error for Error<T> {
         Some(match self {
             Error::Reqwest(e) => e,
             Error::Serde(e) => e,
+            Error::SerdePathToError(e) => e,
             Error::Io(e) => e,
             Error::ResponseError(_) => return None,
         })
@@ -48,6 +51,12 @@ impl <T> From<reqwest::Error> for Error<T> {
 impl <T> From<serde_json::Error> for Error<T> {
     fn from(e: serde_json::Error) -> Self {
         Error::Serde(e)
+    }
+}
+
+impl<T> From<serde_path_to_error::Error<serde_json::Error>> for Error<T> {
+    fn from(e: serde_path_to_error::Error<serde_json::Error>) -> Self {
+        Error::SerdePathToError(e)
     }
 }
 

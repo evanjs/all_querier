@@ -22,7 +22,8 @@ pub enum GameCategoryEnums {
     expansion = 2,
     bundle = 3,
     standalone_expansion = 4,
-    mod = 5,
+    #[serde(rename="mod")]
+    game_mod = 5,
     episode = 6,
     season = 7,
     remake = 8,
@@ -43,7 +44,7 @@ impl std::fmt::Display for GameCategoryEnums {
             Self::expansion => "2",
             Self::bundle => "3",
             Self::standalone_expansion => "4",
-            Self::mod => "5",
+            Self::game_mod => "5",
             Self::episode => "6",
             Self::season => "7",
             Self::remake => "8",

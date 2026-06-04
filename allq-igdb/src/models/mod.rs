@@ -192,3 +192,4 @@ pub mod website_category_enums;
 pub use self::website_category_enums::WebsiteCategoryEnums;
 pub mod website_type;
 pub use self::website_type::WebsiteType;
+pub type Id = i32;

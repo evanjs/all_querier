@@ -10,10 +10,16 @@ edition = "2024"
 serde = { version = "^1.0", features = ["derive"] }
 serde_with = { version = "^3.8", default-features = false, features = ["base64", "std", "macros"] }
 serde_json = "^1.0"
+serde_path_to_error = "0.1.5"
 serde_repr = "^0.1"
 url = "^2.5"
 uuid = { version = "^1.8", features = ["serde", "v4"] }
 reqwest = { version = "^0.13", default-features = false, features = ["json", "multipart", "query", "form"] }
+tracing = { workspace = true }
+async-trait = "0.1.89"
+
+allq-core = { workspace = true }
+anyhow = "1.0.102"
 
 [features]
 default = ["native-tls"]

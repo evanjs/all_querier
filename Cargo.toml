@@ -3,6 +3,7 @@ members = [
     "allq-anilist",
     "allq-cli",
     "allq-core",
+    "allq-igdb",
     "allq-itis",
     "allq-jikan",
     "allq-mal",
@@ -21,6 +22,9 @@ path = "./allq-anilist"
 
 [workspace.dependencies.allq-core]
 path = "./allq-core"
+
+[workspace.dependencies.allq-igdb]
+path = "./allq-igdb"
 
 [workspace.dependencies.allq-itis]
 path = "./allq-itis"
