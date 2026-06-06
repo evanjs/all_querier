@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub use cache::{ProviderCache, all_querier_cache_dir, create_provider_cache};
 pub use dispatcher::SearchDispatcher;
 
+pub const REQWEST_VERSION: &str = env!("REQWEST_VERSION");
+
 /// Controls how a provider resolves requests relative to its local cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FetchMode {

@@ -21,7 +21,7 @@ pub fn app_user_agent() -> String {
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
         email,
-        env!("REQWEST_VERSION"),
+        allq_core::REQWEST_VERSION,
     )
 }
 

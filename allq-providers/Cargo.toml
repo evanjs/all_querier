@@ -6,6 +6,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+allq-core = { workspace = true }
 allq-itis = { workspace = true }
 allq-mal = { workspace = true }
 allq-pcgw = { workspace = true }
@@ -14,5 +15,8 @@ anyhow = "1.0.102"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { workspace = true }
-reqwest = { version = "0.12.9", features = ["json", "native-tls-alpn"] }
+reqwest = { workspace = true }
 tracing = { workspace = true }
+
+[build-dependencies]
+serde_json = "1.0.150"

@@ -53,6 +53,10 @@ path = "./allq-rawg"
 [workspace.dependencies.allq-wikidata]
 path = "./allq-wikidata"
 
+[workspace.dependencies.reqwest]
+version = "0.13.4"
+features = [ "json", "multipart", "query", "form" ]
+
 [workspace.dependencies.tokio]
 version = "1.52.1"
 features = [
