@@ -3,10 +3,11 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 use std::collections::VecDeque;
+use std::ops::DerefMut;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use scraper::{ElementRef, Html, Selector};
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Cargo tables to query and the fields to request from each.
 /// Fields are the exact names as returned by `action=cargofields`.
@@ -364,6 +365,20 @@ impl SearchProvider for PcgwSearchProvider {
             };
 
             let mut data = Map::new();
+            // TODO: evaluate whether we can/should hoist "dynamic" data out of the "only if not returning cached data" flow
+            //   some values are not accessibly presented as properties
+            //   some examples of these values include those under "Game data"
+            //   This list consists of:
+            //   - Configuration file(s) location
+            //   - Save game data location
+            //   - Save game cloud syncing
+            //  It might be better if we exclude this data from the initial search results,
+            //  and instead treat them as post-process enrichments
+            //  That is to say, perhaps we should "recalculate" these values
+            //  even when returning cached results
+            //  If there is a noticable impact on latency, then perhaps another flag makes sense
+            //  For example, "recalculate enrichments" that is distinct from "force fetch",
+            //  "cached only", and "direct only"
             let save_game_locations = &mut get_save_game_and_config_locations(&parse_data, &cargo_data)?;
             data.insert("parse".to_string(), parse_data);
             data.insert("cargo".to_string(), cargo_data);
@@ -407,18 +422,75 @@ fn get_save_game_and_config_locations(parse_data: &Value, cargo_data: &Value) ->
         .context("Failed to get * string from text object")?
         .as_str()
         .context("Failed to get string value from * from text object")?;
+
     // need to grab "Configuration file(s) location", "Save game data location", and "Save Game Cloud Syncing" tables
     // xpath: //h3/span[contains(text(), 'Configuration file(s) location')]/following::div[1][contains(@class, 'container-pcgwikitable')]/table/tbody/tr/text()[1]
     // xpath: //h3/span[contains(text(), 'Save game data location')]/following::div[1][contains(@class, 'container-pcgwikitable')]/table/tbody/tr/text()[1]
     let save_game_location_and_configuration_data = get_save_game_location_and_configuration_data(&data)
-        .context("Failed to extract save game location and configuration data")?;
+        .unwrap_or(Value::Null);
+
     // xpath: //h3/span[contains(text(), 'Save game cloud syncing')]/following::div[1][contains(@class, 'container-pcgwikitable')]/table/tbody/tr/text()[1]
     let save_game_cloud_syncing_data = get_save_game_cloud_syncing_data(&data)
-        .context("Failed to extract cloud syncing data")?;
+        .unwrap_or(Value::Null);
     let mut map = Map::new();
-    map.insert("save_game_and_configuration".to_string(), save_game_location_and_configuration_data);
-    map.insert("save_game_cloud_syncing".to_string(), save_game_cloud_syncing_data);
+
+    let mut game_map = Map::new();
+    &mut append_nested_json_map_if_exists(
+        &save_game_location_and_configuration_data,
+        "Configuration file(s) location",
+        "configuration_files_location",
+        &mut game_map
+    )?;
+
+    &mut append_nested_json_map_if_exists(
+        &save_game_location_and_configuration_data,
+        "Save game data location",
+        "save_game_data_location",
+        &mut game_map
+    )?;
+
+    &mut append_nested_json_map_if_exists(
+        &save_game_cloud_syncing_data,
+        "Save game cloud syncing",
+        "save_game_cloud_syncing",
+        &mut game_map
+    )?;
+
+    map.insert("game_data".to_string(), Value::Object(game_map));
+
     Ok(map)
+}
+
+#[tracing::instrument(skip(data))]
+fn append_nested_json_map_if_exists(
+    data: &Value,
+    path: &str,
+    name: &str,
+    out_map: &mut Map<String, Value>
+) -> anyhow::Result<()> {
+    match data.get(path) {
+        None => {
+            // Value doesn't exist
+            // Don't append anything but return `Ok(())` / Success
+            debug!(
+                ?path,
+                ?data,
+                "No value found under path"
+            );
+            Ok(())
+        }
+        Some(map) => {
+            debug!(
+                ?path,
+                ?data,
+                ?map,
+                "Found value under path"
+            );
+
+            out_map.insert(name.to_string(), map.clone());
+            Ok(())
+        }
+    }
 }
 
 fn get_save_game_location_and_configuration_data(data: &str) -> anyhow::Result<Value> {
@@ -433,6 +505,14 @@ fn get_save_game_location_and_configuration_data(data: &str) -> anyhow::Result<V
     )
 }
 
+// TODO: this only presents <th> values right now
+//   we don't present any "translated" form of the <td> cells at the moment
+//   This makes the information near useless
+//   The icons presented on the Wiki will map to "Native", "Unknown", "No Native Support", etc.
+//   These values should be presented in a "Native" column alongside "System" to indicate
+//   the associated level of support
+//   e.g.: "System, Native, Notes"
+//         "Steam Cloud, No Native Support,null"
 fn get_save_game_cloud_syncing_data(data: &str) -> anyhow::Result<Value> {
     // headers (tr): System, Location, Notes
     // possible rows (th) GOG Galaxy, Steam
