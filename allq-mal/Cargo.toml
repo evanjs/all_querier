@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 allq-core = { path = "../allq-core" }
 myanimelist =  { path = "C:\\Users\\evanjs\\src\\mal-api-rs" }
-anyhow = "1.0"
+anyhow = { workspace = true }
 async-trait = "0.1"
 serde_json = { workspace = true }
 serde = { version = "1.0.228", features = ["derive"] }

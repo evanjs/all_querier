@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 allq-core = { path = "../allq-core" }
 mediawiki = "0.5.1"
 tokio = { workspace = true }
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 async-trait = "0.1"
 serde_json = { workspace = true }
 foyer = { version = "0.22.3", features = ["serde"] }

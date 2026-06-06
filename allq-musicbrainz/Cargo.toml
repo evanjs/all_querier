@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 allq-core = { path = "../allq-core" }
 musicbrainz_rs = { version = "0.13", features = ["async", "rate_limit"] }
 tokio = { workspace = true }
-anyhow = "1"
+anyhow = { workspace = true }
 async-trait = "0.1"
 serde_json = { workspace = true }
 serde = { version = "1", features = ["derive"] }

@@ -6,7 +6,7 @@ description = "A standalone AllQuerier search provider for {{ provider-name }}"
 
 [dependencies]
 allq-core = { workspace = true }
-anyhow = "1.0"
+anyhow = { workspace = true }
 async-trait = "0.1"
 tokio = { workspace = true }
 tracing = { workspace = true }

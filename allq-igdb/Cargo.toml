@@ -16,5 +16,5 @@ tracing = { workspace = true }
 async-trait = "0.1.89"
 
 allq-core = { workspace = true }
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 igdb-atlas = "0.1.1"

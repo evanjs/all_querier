@@ -28,7 +28,7 @@ allq-mal.workspace = true
 allq-providers.workspace = true
 allq-query = { workspace = true, features = ["nu"] }
 allq-rawg = { workspace = true }
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 serde_json = { workspace = true }
 tokio.workspace = true
 tracing-subscriber.workspace = true
