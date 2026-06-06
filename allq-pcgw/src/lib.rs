@@ -3,9 +3,11 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 use std::collections::VecDeque;
+use std::ops::DerefMut;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tracing::debug;
+use scraper::{ElementRef, Html, Selector};
+use tracing::{debug, trace};
 
 /// Cargo tables to query and the fields to request from each.
 /// Fields are the exact names as returned by `action=cargofields`.
@@ -363,8 +365,24 @@ impl SearchProvider for PcgwSearchProvider {
             };
 
             let mut data = Map::new();
+            // TODO: evaluate whether we can/should hoist "dynamic" data out of the "only if not returning cached data" flow
+            //   some values are not accessibly presented as properties
+            //   some examples of these values include those under "Game data"
+            //   This list consists of:
+            //   - Configuration file(s) location
+            //   - Save game data location
+            //   - Save game cloud syncing
+            //  It might be better if we exclude this data from the initial search results,
+            //  and instead treat them as post-process enrichments
+            //  That is to say, perhaps we should "recalculate" these values
+            //  even when returning cached results
+            //  If there is a noticable impact on latency, then perhaps another flag makes sense
+            //  For example, "recalculate enrichments" that is distinct from "force fetch",
+            //  "cached only", and "direct only"
+            let save_game_locations = &mut get_save_game_and_config_locations(&parse_data, &cargo_data)?;
             data.insert("parse".to_string(), parse_data);
             data.insert("cargo".to_string(), cargo_data);
+            data.append(save_game_locations);
 
             let description = entry
                 .get("snippet")
@@ -388,4 +406,294 @@ impl SearchProvider for PcgwSearchProvider {
 
         Ok(out)
     }
+}
+
+
+fn get_save_game_and_config_locations(parse_data: &Value, cargo_data: &Value) -> anyhow::Result<Map<String, Value>> {
+    debug!(
+        ?parse_data,
+        ?cargo_data,
+    );
+    let data = parse_data.get("text")
+        .context("Failed to unwrap parse data text")?
+        .as_object()
+        .context("Failed to get text as object")?
+        .get("*")
+        .context("Failed to get * string from text object")?
+        .as_str()
+        .context("Failed to get string value from * from text object")?;
+
+    // need to grab "Configuration file(s) location", "Save game data location", and "Save Game Cloud Syncing" tables
+    // xpath: //h3/span[contains(text(), 'Configuration file(s) location')]/following::div[1][contains(@class, 'container-pcgwikitable')]/table/tbody/tr/text()[1]
+    // xpath: //h3/span[contains(text(), 'Save game data location')]/following::div[1][contains(@class, 'container-pcgwikitable')]/table/tbody/tr/text()[1]
+    let save_game_location_and_configuration_data = get_save_game_location_and_configuration_data(&data)
+        .unwrap_or(Value::Null);
+
+    // xpath: //h3/span[contains(text(), 'Save game cloud syncing')]/following::div[1][contains(@class, 'container-pcgwikitable')]/table/tbody/tr/text()[1]
+    let save_game_cloud_syncing_data = get_save_game_cloud_syncing_data(&data)
+        .unwrap_or(Value::Null);
+    let mut map = Map::new();
+
+    let mut game_map = Map::new();
+    &mut append_nested_json_map_if_exists(
+        &save_game_location_and_configuration_data,
+        "Configuration file(s) location",
+        "configuration_files_location",
+        &mut game_map
+    )?;
+
+    &mut append_nested_json_map_if_exists(
+        &save_game_location_and_configuration_data,
+        "Save game data location",
+        "save_game_data_location",
+        &mut game_map
+    )?;
+
+    &mut append_nested_json_map_if_exists(
+        &save_game_cloud_syncing_data,
+        "Save game cloud syncing",
+        "save_game_cloud_syncing",
+        &mut game_map
+    )?;
+
+    map.insert("game_data".to_string(), Value::Object(game_map));
+
+    Ok(map)
+}
+
+#[tracing::instrument(skip(data))]
+fn append_nested_json_map_if_exists(
+    data: &Value,
+    path: &str,
+    name: &str,
+    out_map: &mut Map<String, Value>
+) -> anyhow::Result<()> {
+    match data.get(path) {
+        None => {
+            // Value doesn't exist
+            // Don't append anything but return `Ok(())` / Success
+            debug!(
+                ?path,
+                ?data,
+                "No value found under path"
+            );
+            Ok(())
+        }
+        Some(map) => {
+            debug!(
+                ?path,
+                ?data,
+                ?map,
+                "Found value under path"
+            );
+
+            out_map.insert(name.to_string(), map.clone());
+            Ok(())
+        }
+    }
+}
+
+fn extract_pcgw_cell_value(cell: ElementRef<'_>, title_selector: &Selector) -> String {
+    let raw_text = cell
+        .text()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let normalized_text = normalize_pcgw_cell_text(&raw_text);
+    if !normalized_text.is_empty() {
+        return normalized_text;
+    }
+
+    cell.value()
+        .attr("title")
+        .or_else(|| {
+            cell.select(title_selector)
+                .find_map(|element| element.value().attr("title"))
+        })
+        .map(normalize_pcgw_cell_text)
+        .unwrap_or_default()
+}
+
+fn get_save_game_location_and_configuration_data(data: &str) -> anyhow::Result<Value> {
+    // headers (tr): System\tLocation
+    // possible rows (th): Windows, Mac OS (Classic), macOS (OS X), Steam Play (Linux) || Linux
+    extract_pcgw_tables(
+        data,
+        &[
+            "Configuration file(s) location",
+            "Save game data location",
+        ],
+    )
+}
+
+// TODO: this only presents <th> values right now
+//   we don't present any "translated" form of the <td> cells at the moment
+//   This makes the information near useless
+//   The icons presented on the Wiki will map to "Native", "Unknown", "No Native Support", etc.
+//   These values should be presented in a "Native" column alongside "System" to indicate
+//   the associated level of support
+//   e.g.: "System, Native, Notes"
+//         "Steam Cloud, No Native Support,null"
+fn get_save_game_cloud_syncing_data(data: &str) -> anyhow::Result<Value> {
+    // headers (tr): System, Location, Notes
+    // possible rows (th) GOG Galaxy, Steam
+    extract_pcgw_tables(data, &["Save game cloud syncing"])
+}
+
+fn normalize_pcgw_cell_text(raw: &str) -> String {
+    let collapsed = collapse_pcgw_cell_whitespace(raw);
+    strip_pcgw_note_markers(&collapsed)
+}
+
+fn collapse_pcgw_cell_whitespace(raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() {
+            while matches!(chars.peek().copied(), Some(next) if next.is_whitespace()) {
+                chars.next();
+            }
+
+            let previous_is_path_separator = output
+                .chars()
+                .next_back()
+                .is_some_and(|previous| matches!(previous, '/' | '\\'));
+            let next_is_path_separator = matches!(chars.peek().copied(), Some('/') | Some('\\'));
+
+            if !previous_is_path_separator && !next_is_path_separator {
+                output.push(' ');
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+
+    output.trim().to_string()
+}
+
+fn strip_pcgw_note_markers(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut index = 0;
+    let bytes = text.as_bytes();
+
+    while index < text.len() {
+        if bytes[index..].starts_with(b"[Note ") {
+            let mut cursor = index + b"[Note ".len();
+            let digit_start = cursor;
+
+            while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                cursor += 1;
+            }
+
+            if cursor > digit_start && cursor < bytes.len() && bytes[cursor] == b']' {
+                index = cursor + 1;
+                continue;
+            }
+        }
+
+        let ch = text[index..]
+            .chars()
+            .next()
+            .expect("index is always on a UTF-8 character boundary");
+        output.push(ch);
+        index += ch.len_utf8();
+    }
+
+    collapse_pcgw_cell_whitespace(&output)
+}
+
+fn extract_pcgw_tables(data: &str, headings: &[&str]) -> anyhow::Result<Value> {
+    let document = Html::parse_document(data);
+
+    let h3_selector = Selector::parse("h3").unwrap();
+    let table_container_selector = Selector::parse("div.container-pcgwikitable").unwrap();
+    let row_selector = Selector::parse("tr").unwrap();
+    let cell_selector = Selector::parse("th, td").unwrap();
+    let title_selector = Selector::parse("[title]").unwrap();
+
+    let mut output = Map::new();
+
+    for heading in headings {
+        let Some(h3) = document
+            .select(&h3_selector)
+            .find(|h3| h3.text().collect::<String>().contains(heading))
+        else {
+            continue;
+        };
+
+        let Some(container) = h3
+            .next_siblings()
+            .filter_map(ElementRef::wrap)
+            .find(|element| {
+                element
+                    .select(&table_container_selector)
+                    .next()
+                    .is_some()
+                    || element.value().has_class(
+                    "container-pcgwikitable",
+                    scraper::CaseSensitivity::AsciiCaseInsensitive,
+                )
+            })
+        else {
+            continue;
+        };
+
+        let table_container = if container
+            .value()
+            .has_class("container-pcgwikitable", scraper::CaseSensitivity::AsciiCaseInsensitive)
+        {
+            container
+        } else {
+            container
+                .select(&table_container_selector)
+                .next()
+                .context("found wrapper but no PCGW table container")?
+        };
+
+        let rows = table_container
+            .select(&row_selector)
+            .map(|row| {
+                row.select(&cell_selector)
+                    .map(|cell| extract_pcgw_cell_value(cell, &title_selector))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|row| row.iter().any(|cell| !cell.is_empty()))
+            .collect::<Vec<_>>();
+
+        let Some((headers, body_rows)) = rows.split_first() else {
+            continue;
+        };
+
+        let structured_rows = body_rows
+            .iter()
+            .map(|cells| {
+                let values = cells
+                    .iter()
+                    .enumerate()
+                    .map(|(index, cell)| {
+                        let key = headers
+                            .get(index)
+                            .filter(|header| !header.is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| format!("column_{index}"));
+
+                        (key, Value::String(cell.clone()))
+                    })
+                    .collect::<Map<_, _>>();
+
+                Value::Object(values)
+            })
+            .collect::<Vec<_>>();
+
+        output.insert((*heading).to_string(), Value::Array(structured_rows));
+    }
+
+    if output.is_empty() {
+        anyhow::bail!("No matching PCGW tables found for headings: {headings:?}");
+    }
+
+    Ok(Value::Object(output))
 }
