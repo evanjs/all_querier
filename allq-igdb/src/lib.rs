@@ -7,8 +7,6 @@ extern crate serde_json;
 extern crate serde_repr;
 extern crate url;
 
-use crate::apis::configuration::{ApiKey, Configuration};
-use crate::models::{Games, Search};
 use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -20,9 +18,6 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::{env, fs};
 use tracing::{debug, error, trace};
-
-pub mod apis;
-pub mod models;
 
 pub const SUPPORTED_TYPES: &[&str] = &["video-game"];
 pub(crate) const LINK_ALIASES: &[&str] = &[
