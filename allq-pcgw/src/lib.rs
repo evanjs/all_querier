@@ -493,6 +493,29 @@ fn append_nested_json_map_if_exists(
     }
 }
 
+fn extract_pcgw_cell_value(cell: ElementRef<'_>, title_selector: &Selector) -> String {
+    let raw_text = cell
+        .text()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let normalized_text = normalize_pcgw_cell_text(&raw_text);
+    if !normalized_text.is_empty() {
+        return normalized_text;
+    }
+
+    cell.value()
+        .attr("title")
+        .or_else(|| {
+            cell.select(title_selector)
+                .find_map(|element| element.value().attr("title"))
+        })
+        .map(normalize_pcgw_cell_text)
+        .unwrap_or_default()
+}
+
 fn get_save_game_location_and_configuration_data(data: &str) -> anyhow::Result<Value> {
     // headers (tr): System\tLocation
     // possible rows (th): Windows, Mac OS (Classic), macOS (OS X), Steam Play (Linux) || Linux
@@ -589,6 +612,7 @@ fn extract_pcgw_tables(data: &str, headings: &[&str]) -> anyhow::Result<Value> {
     let table_container_selector = Selector::parse("div.container-pcgwikitable").unwrap();
     let row_selector = Selector::parse("tr").unwrap();
     let cell_selector = Selector::parse("th, td").unwrap();
+    let title_selector = Selector::parse("[title]").unwrap();
 
     let mut output = Map::new();
 
@@ -633,20 +657,10 @@ fn extract_pcgw_tables(data: &str, headings: &[&str]) -> anyhow::Result<Value> {
             .select(&row_selector)
             .map(|row| {
                 row.select(&cell_selector)
-                    .map(|cell| {
-                        let raw_text = cell
-                            .text()
-                            .map(str::trim)
-                            .filter(|text| !text.is_empty())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-
-                        normalize_pcgw_cell_text(&raw_text)
-                    })
-                    .filter(|cell| !cell.is_empty())
+                    .map(|cell| extract_pcgw_cell_value(cell, &title_selector))
                     .collect::<Vec<_>>()
             })
-            .filter(|row| !row.is_empty())
+            .filter(|row| row.iter().any(|cell| !cell.is_empty()))
             .collect::<Vec<_>>();
 
         let Some((headers, body_rows)) = rows.split_first() else {
