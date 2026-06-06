@@ -11,7 +11,7 @@ nu = ["dep:nu-protocol", "dep:nu-plugin"]
 
 [dependencies]
 anyhow = "1.0.102"
-serde_json = "1.0.149"
+serde_json = { workspace = true }
 allq-providers = { workspace = true }
 allq-wikidata = { workspace = true }
 tracing = { workspace = true }

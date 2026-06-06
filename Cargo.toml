@@ -57,6 +57,10 @@ path = "./allq-wikidata"
 version = "0.13.4"
 features = [ "json", "multipart", "query", "form" ]
 
+[workspace.dependencies.serde_json]
+version = "1.0.150"
+features = [ "preserve_order" ]
+
 [workspace.dependencies.tokio]
 version = "1.52.1"
 features = [

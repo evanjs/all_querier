@@ -10,6 +10,6 @@ allq-core = { path = "../allq-core" }
 myanimelist =  { path = "C:\\Users\\evanjs\\src\\mal-api-rs" }
 anyhow = "1.0"
 async-trait = "0.1"
-serde_json = "1.0.149"
+serde_json = { workspace = true }
 serde = { version = "1.0.228", features = ["derive"] }
 tracing = { workspace = true }

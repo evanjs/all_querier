@@ -11,7 +11,7 @@ musicbrainz_rs = { version = "0.13", features = ["async", "rate_limit"] }
 tokio = { workspace = true }
 anyhow = "1"
 async-trait = "0.1"
-serde_json = "1"
+serde_json = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 tracing = { workspace = true }
 foyer = { version = "0.22.3", features = ["serde"] }

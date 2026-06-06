@@ -11,7 +11,7 @@ mediawiki = "0.5.1"
 tokio = { workspace = true }
 anyhow = "1.0.102"
 async-trait = "0.1"
-serde_json = "1.0.149"
+serde_json = { workspace = true }
 foyer = { version = "0.22.3", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
 dirs = "6.0.0"
