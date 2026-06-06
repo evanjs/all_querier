@@ -4,6 +4,11 @@ use tracing_subscriber::EnvFilter;
 mod commands;
 pub use commands::*;
 
+pub(crate) use nu_plugin_all_querier::{
+    labeled_error,
+    serde_json_to_nu_value
+};
+
 pub struct AllQuerierPlugin;
 
 // TODO: consider moving these to something more structured

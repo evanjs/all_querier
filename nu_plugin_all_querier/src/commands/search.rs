@@ -17,8 +17,7 @@ use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
 use allq_rawg::{RawgProvider, SUPPORTED_TYPES as RAWG_SUPPORTED_TYPES};
 use allq_itis::{ItisProvider, SUPPORTED_TYPES as ITIS_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
-
-use crate::{AllQuerierPlugin, init_logging, user_agent_email};
+use crate::{AllQuerierPlugin, init_logging, user_agent_email, labeled_error, serde_json_to_nu_value};
 
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 fn runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
@@ -351,49 +350,4 @@ async fn run_search(
     };
 
     dispatcher.search(query, item_type, &options).await
-}
-
-fn serde_json_to_nu_value(value: serde_json::Value, span: Span) -> anyhow::Result<Value> {
-    match value {
-        serde_json::Value::Null => Ok(Value::nothing(span)),
-        serde_json::Value::Bool(v) => Ok(Value::bool(v, span)),
-        serde_json::Value::Number(v) => {
-            if let Some(v) = v.as_i64() {
-                Ok(Value::int(v, span))
-            } else if let Some(v) = v.as_u64() {
-                let v = i64::try_from(v)?;
-                Ok(Value::int(v, span))
-            } else if let Some(v) = v.as_f64() {
-                Ok(Value::float(v, span))
-            } else {
-                Ok(Value::nothing(span))
-            }
-        }
-        serde_json::Value::String(v) => Ok(Value::string(v, span)),
-        serde_json::Value::Array(values) => {
-            let values = values
-                .into_iter()
-                .map(|v| serde_json_to_nu_value(v, span))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            Ok(Value::list(values, span))
-        }
-        serde_json::Value::Object(object) => {
-            let record = object
-                .into_iter()
-                .map(|(key, value)| {
-                    serde_json_to_nu_value(value, span).map(|v| (key, v))
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            Ok(Value::record(record.into_iter().collect(), span))
-        }
-    }
-}
-
-fn labeled_error(
-    span: Span,
-    message: impl Into<String>,
-    error: impl std::fmt::Display,
-) -> LabeledError {
-    LabeledError::new(message.into())
-        .with_label(error.to_string(), span)
 }
