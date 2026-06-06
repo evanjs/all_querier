@@ -1,22 +1,25 @@
 #![allow(unused_imports)]
 #![allow(clippy::too_many_arguments)]
 
-extern crate serde_repr;
+extern crate reqwest;
 extern crate serde;
 extern crate serde_json;
+extern crate serde_repr;
 extern crate url;
-extern crate reqwest;
 
-use std::{env, fs};
-use std::collections::VecDeque;
-use std::sync::Mutex;
+use crate::apis::configuration::{ApiKey, Configuration};
+use crate::models::{Games, Search};
+use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use igdb_atlas::endpoints::traits::{Endpoint, NameFilterable, Searchable};
+use igdb_atlas::{ClientConfig, IGDBClient, IGDBError, QueryBuilder};
 use serde::Deserialize;
 use serde_json::Value;
-use tracing::{debug, trace};
-use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
-use crate::apis::configuration::{ApiKey, Configuration};
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::{env, fs};
+use tracing::{debug, error, trace};
 
 pub mod apis;
 pub mod models;
@@ -77,20 +80,47 @@ impl IGDBProvider {
             cache.insert(key, value);
         }
     }
+
+    async fn search_game(&self, client: &IGDBClient, query: &str, search_options: &SearchOptions) -> Result<Vec<igdb_atlas::Game>> {
+        // TODO: make this customizable
+        client
+            .games()
+            .search(&query)
+            .limit(search_options.limit.unwrap_or(10))
+            .execute()
+            .await
+            .inspect_err(|e| {
+                error!(
+                    error =? e,
+                    "Failed to search using IGDB atlas"
+                )
+            }).map_err(|e| {
+            e.into()
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct IGDBConfig {
     igdb_api_key: Option<String>,
     igdb_client_id: Option<String>,
+    igdb_client_secret: Option<String>,
 }
 
-pub fn get_config() -> Result<IGDBConfig> {
-    match (env::var("IGDB_API_KEY"), env::var("IGDB_CLIENT_ID")) {
-        (Ok(igdb_api_key), Ok(igdb_client_id)) => {
+pub fn get_local_config() -> Result<IGDBConfig> {
+    match (env::var("IGDB_API_KEY"), env::var("IGDB_CLIENT_ID"), env::var("IGDB_CLIENT_SECRET")) {
+        (Ok(igdb_api_key), Ok(igdb_client_id), _) => {
             return Ok(IGDBConfig {
                 igdb_api_key: Some(igdb_api_key),
-                igdb_client_id: Some(igdb_client_id)
+                igdb_client_id: Some(igdb_client_id),
+                igdb_client_secret: None
+            });
+        },
+        (_, Ok(igdb_client_id), Ok(igdb_client_secret)) => {
+            return Ok(IGDBConfig {
+                igdb_api_key: None,
+                igdb_client_id: Some(igdb_client_id),
+                igdb_client_secret: Some(igdb_client_secret)
             });
         }
         _ => {}
@@ -118,7 +148,46 @@ pub fn get_config() -> Result<IGDBConfig> {
         return Ok(config);
     }
 
-    anyhow::bail!("Please set IGDB_API_KEY in environment or in {:?}", path)
+    anyhow::bail!("Failed to parse IGDB configuration")
+}
+
+
+impl TryInto<ClientConfig> for IGDBConfig {
+    type Error = IGDBError;
+
+    fn try_into(self) -> std::result::Result<ClientConfig, Self::Error> {
+        match (self.igdb_client_id, self.igdb_client_secret) {
+            (Some(client_id), Some(client_secret)) => {
+                let config = ClientConfig::builder()
+                    .client_id(&client_id)
+                    .client_secret(&client_secret)
+                    .build()
+                    .expect("Failed to construct IGDB Client Config");
+                Ok(config)
+            },
+            (None, Some(_)) => {
+                let error = std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Client ID was not found in local configuration"
+                );
+                Err(IGDBError::from_custom(error))
+            },
+            (Some(_), None) => {
+                let error = std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Client Secret token was not found in local configuration"
+                );
+                Err(IGDBError::from_custom(error))
+            },
+            _ => {
+                let error = std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Neither Client ID nor Client Secret were not found in local configuration"
+                );
+                Err(IGDBError::from_custom(error))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -148,11 +217,15 @@ impl SearchProvider for IGDBProvider {
         );
 
         let fetch_mode = options.fetch_mode;
-        let config = get_config()?;
+        let config = get_local_config()?;
         debug!(
             ?config
         );
-        let search_cache_key = format!("igdb:search:{itype}:{query}:{limit}");
+        let i_config = config
+            .try_into()
+            .expect("Failed to get IGDB atlas configuration from local configuration");
+        let client = IGDBClient::new(i_config).await?;
+        let search_cache_key = format!("igdb:v2:search:{itype}:{query}:{limit}");
 
         // Try to serve the full result list from cache.
         if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
@@ -167,39 +240,7 @@ impl SearchProvider for IGDBProvider {
             return Ok(Vec::new());
         }
 
-        // TODO: make this customizable
-        let query = format!(
-            "fields alternative_name,character,checksum,collection,company,description,game,name,platform,published_at,test_dummy,theme; search \"{}\";",
-            query
-        );
-
-        let results = match (config.igdb_client_id, config.igdb_api_key) {
-            (Some(client_id), Some(api_key)) => {
-                let igdb_config = &Configuration {
-                    client: self.client.clone(),
-                    user_agent: Some(user_agent()),
-                    oauth_access_token: Some(api_key),
-                    api_key: Some(ApiKey {
-                        prefix: Some(client_id),
-                        key: "".to_string()
-                    }),
-                    ..Default::default()
-                };
-
-                debug!(
-                    ?igdb_config,
-                );
-
-                apis::endpoints_api::retreive_search(
-                    igdb_config,
-                    Some(&query)
-                ).await?
-            },
-            _ => {
-                // No API key found, bail out
-                anyhow::bail!("Failed to find IGDB API key. Exiting ...");
-            }
-        };
+        let results = self.search_game(&client, query, options).await?;
 
         // TODO: handle pagination
         let search_results = results.iter().map(|game| {
@@ -207,13 +248,14 @@ impl SearchProvider for IGDBProvider {
                 .expect("Failed to convert IGDB game to JSON");
             SearchResult {
                 provider: "igdb".to_string(),
-                id: game.id.as_ref().expect("Failed to find game ID").to_string(),
-                label: game.name.as_ref().expect("Failed to find game name").to_string(),
-                description: game.description.clone(),
+                id: game.id.to_string(),
+                label: game.name.as_ref().unwrap_or(&"No label".to_string()).to_string(),
+                description: game.summary.clone(),
                 item_type: Some("video-game".to_string()),
                 data: game_value,
             }
         }).collect::<Vec<_>>();
+
 
         // Cache the assembled result list.
         if let Ok(json) = serde_json::to_string(&search_results) {
