@@ -209,6 +209,12 @@ curated_wikidata_item_types! {
         qid: "Q196600",
         label: "franchise",
         description: "use of a creative work across several different media",
+    },
+    {
+        key: "person",
+        qid: "Q215627",
+        label: "person",
+        description: "being that has certain capacities or attributes constituting personhood (for humans, use Q5 [human] with P31 [instance of])"
     }
 }
 
