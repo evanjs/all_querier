@@ -14,5 +14,5 @@ allq-providers = { workspace = true }
 allq-wikidata = { workspace = true }
 tracing = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"], optional = true }
-nu-protocol = { version = "0.112.2", features = ["plugin"], optional = true }
-nu-plugin = { version = "0.112.2", optional = true }
+nu-protocol = { version = "0.113.1", features = ["plugin"], optional = true }
+nu-plugin = { version = "0.113.1", optional = true }

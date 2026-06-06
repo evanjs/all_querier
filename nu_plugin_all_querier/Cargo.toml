@@ -1,7 +1,7 @@
 [package]
 
 name = "nu_plugin_all_querier"
-version = "0.1.0+0.112.2"
+version = "0.1.0+0.113.1"
 authors = ["Evan Stoll <evanjsx@gmail.com>"]
 edition = "2021"
 description = "a nushell plugin called all_querier"
@@ -14,10 +14,11 @@ license = "MIT"
 # for local development, you can use a path dependency
 # nu-plugin = { path = "../nushell/crates/nu-plugin" }
 # nu-protocol = { path = "../nushell/crates/nu-protocol", features = ["plugin"] }
-nu-plugin = "0.112.2"
-nu-protocol = { version = "0.112.2", features = ["plugin"] }
+nu-plugin = "0.113.1"
+nu-protocol = { version = "0.113.1", features = ["plugin"] }
 allq-anilist.workspace = true
 allq-core.workspace = true
+allq-igdb.workspace = true
 allq-itis.workspace = true
 allq-jikan.workspace = true
 allq-musicbrainz.workspace = true
@@ -36,4 +37,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 # nu-plugin-test-support = { path = "../nushell/crates/nu-plugin-test-support" }
-nu-plugin-test-support = { version = "0.112.2" }
+nu-plugin-test-support = { version = "0.113.1" }

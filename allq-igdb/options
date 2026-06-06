@@ -1,0 +1,67 @@
+
+CONFIG OPTIONS
+
+	avoidBoxedModels
+	    If set, `Box<T>` will not be used for models (Default: false)
+
+	bestFitInt
+	    Use best fitting integer type where minimum or maximum is set (Default: false)
+
+	enumNameSuffix
+	    Suffix that will be appended to all enum names. (Default: )
+
+	hideGenerationTimestamp
+	    Hides the generation timestamp when files are generated. (Default: true)
+
+	library
+	    library template (sub-template) to use. (Default: reqwest)
+	        hyper - HTTP client: Hyper (v1.x).
+	        hyper0x - HTTP client: Hyper (v0.x).
+	        reqwest - HTTP client: Reqwest.
+	        reqwest-trait - HTTP client: Reqwest (trait based).
+
+	mockall
+	    Adds `#[automock]` from the mockall crate to api traits. This option is for 'reqwest-trait' library only (Default: false)
+
+	packageName
+	    Rust package name (convention: lowercase). (Default: openapi)
+
+	packageVersion
+	    Rust package version. (Default: 1.0.0)
+
+	preferUnsignedInt
+	    Prefer unsigned integers where minimum value is >= 0 (Default: false)
+
+	reqwestDefaultFeatures
+	    Default features for the reqwest dependency (comma-separated). Use empty for no defaults. This option is for 'reqwest' and 'reqwest-trait' library only. (Default: native-tls)
+
+	supportAsync
+	    If set, generate async function call instead. This option is for 'reqwest' library only (Default: true)
+
+	supportMiddleware
+	    If set, add support for reqwest-middleware. This option is for 'reqwest' and 'reqwest-trait' library only (Default: false)
+
+	supportMultipleResponses
+	    If set, return type wraps an enum of all possible 2xx schemas. This option is for 'reqwest' and 'reqwest-trait' library only (Default: false)
+
+	supportTokenSource
+	    If set, add support for google-cloud-token. This option is for 'reqwest' and 'reqwest-trait' library only and requires the 'supportAsync' option (Default: false)
+
+	topLevelApiClient
+	    Creates a top level `Api` trait and `ApiClient` struct that contain all Apis. This option is for 'reqwest-trait' library only (Default: false)
+
+	useBonBuilder
+	    Use the bon crate for building parameter types. This option is for the 'reqwest-trait' library only (Default: false)
+
+	useChrono
+	    If set, use chrono to represent date time objects (`chrono::NaiveDate` for `date` and `chrono::DateTime<chrono::FixedOffset>>` for `date-time`) (Default: true)
+
+	useSerdePathToError
+	    If set, use the serde_path_to_error library to enhance serde error messages. This option is for 'reqwest' and 'reqwest-trait' library only (Default: false)
+
+	useSingleRequestParameter
+	    Setting this property to true will generate functions with a single argument containing all API endpoint parameters instead of one argument per parameter. (Default: false)
+
+	withAWSV4Signature
+	    whether to include AWS v4 signature support (Default: false)
+
