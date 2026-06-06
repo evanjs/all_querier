@@ -1,7 +1,6 @@
 #![allow(unused_imports)]
 #![allow(clippy::too_many_arguments)]
 
-extern crate reqwest;
 extern crate serde;
 extern crate serde_json;
 extern crate serde_repr;
@@ -26,35 +25,18 @@ pub(crate) const LINK_ALIASES: &[&str] = &[
 
 /// A `SearchProvider` backed by the IGDBProvider API.
 pub struct IGDBProvider {
-    client: reqwest::Client,
     cache: Option<ProviderCache>,
-}
-
-fn user_agent() -> String {
-    concat!(
-    env!("CARGO_PKG_NAME"),
-    "/",
-    env!("CARGO_PKG_VERSION")
-    ).to_string()
 }
 
 impl IGDBProvider {
     pub fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(user_agent())
-            .build()?;
-
-        Ok(Self { client, cache: None })
+        Ok(Self { cache: None })
     }
 
 
     /// Create a new provider with the given user-agent string and a foyer hybrid cache.
     pub fn new_with_cache(cache: ProviderCache) -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(user_agent())
-            .build()?;
-
-        Ok(Self { client, cache: Some(cache) })
+        Ok(Self { cache: Some(cache) })
     }
 
     /// Look up a cached JSON string for `key`, respecting `fetch_mode`.
