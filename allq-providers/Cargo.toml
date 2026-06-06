@@ -1,7 +1,9 @@
 [package]
 name = "allq-providers"
 version = "0.1.0"
+authors = ["Evan Stoll <evanjsx@gmail.com>"]
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 allq-itis = { workspace = true }

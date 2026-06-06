@@ -1,8 +1,10 @@
 [package]
 name = "allq-itis"
 version = "0.1.0"
-edition = "2021"
-description = "A standalone AllQuerier search provider for "
+authors = ["Evan Stoll <evanjsx@gmail.com>"]
+edition = "2024"
+description = "A standalone AllQuerier search provider for ITIS"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 allq-core = { workspace = true }

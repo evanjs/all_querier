@@ -1,9 +1,9 @@
 [package]
 name = "allq-musicbrainz"
 version = "0.1.0"
-edition = "2024"
-
 authors = ["Evan Stoll <evanjsx@gmail.com>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 allq-core = { path = "../allq-core" }

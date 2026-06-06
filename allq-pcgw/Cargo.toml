@@ -1,8 +1,9 @@
 [package]
 name = "allq-pcgw"
 version = "0.1.0"
+authors = ["Evan Stoll <evanjsx@gmail.com>"]
 edition = "2021"
-authors = ["<same as other crates>"]
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 allq-core = { path = "../allq-core" }

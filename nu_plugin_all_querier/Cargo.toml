@@ -3,10 +3,10 @@
 name = "nu_plugin_all_querier"
 version = "0.1.0+0.113.1"
 authors = ["Evan Stoll <evanjsx@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "a nushell plugin called all_querier"
 repository = "https://github.com/evanjs/nu_plugin_all_querier"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
