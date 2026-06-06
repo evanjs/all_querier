@@ -67,6 +67,8 @@ features = [
     "rt",
     "rt-multi-thread",
     "macros",
+    "time",
+    "full"
 ]
 
 [workspace.dependencies.tracing]
