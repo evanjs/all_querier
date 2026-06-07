@@ -1,23 +1,28 @@
+use std::convert::Infallible;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tracing::{debug, warn};
+use strum::VariantNames;
+use tracing::{debug, error, warn};
 
-use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
-use nu_protocol::{
-    Category, Completion, Example, Flag, LabeledError, Signature, Span, SyntaxShape, Value,
+use crate::{
+    AllQuerierPlugin, init_logging, labeled_error, serde_json_to_nu_value, user_agent_email,
 };
 use allq_anilist::{AniListProvider, SUPPORTED_TYPES as ANILIST_SUPPORTED_TYPES};
-use allq_core::{FetchMode, SearchDispatcher, SearchOptions};
+use allq_core::{FetchMode, GameStoreType, SearchDispatcher, SearchOptions};
 use allq_igdb::{IGDBProvider, SUPPORTED_TYPES as IGDB_SUPPORTED_TYPES};
+use allq_itis::{ItisProvider, SUPPORTED_TYPES as ITIS_SUPPORTED_TYPES};
 use allq_jikan::JikanProvider;
-use allq_query::{add_fetch_flags, read_fetch_args};
 use allq_mal::{MAL_MEDIA_TYPES, SUPPORTED_TYPES as MAL_SUPPORTED_TYPES};
 use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
+use allq_query::{add_fetch_flags, read_fetch_args};
 use allq_rawg::{RawgProvider, SUPPORTED_TYPES as RAWG_SUPPORTED_TYPES};
-use allq_itis::{ItisProvider, SUPPORTED_TYPES as ITIS_SUPPORTED_TYPES};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
-use crate::{AllQuerierPlugin, init_logging, user_agent_email, labeled_error, serde_json_to_nu_value};
+use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
+use nu_protocol::{
+    Category, Completion, Example, Flag, FromValue, LabeledError, Signature, Span, SyntaxShape,
+    Value,
+};
 
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 fn runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
@@ -30,7 +35,21 @@ fn runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
 }
 
 /// Static list of provider names supported by the `search` command.
-pub const SEARCH_PROVIDER_NAMES: &[&str] = &["musicbrainz", "wikidata", "pcgw", "myanimelist", "jikan", "anilist", "itis", "rawg", "igdb"];
+pub const SEARCH_PROVIDER_NAMES: &[&str] = &[
+    "musicbrainz",
+    "wikidata",
+    "pcgw",
+    "myanimelist",
+    "jikan",
+    "anilist",
+    "itis",
+    "rawg",
+    "igdb",
+];
+pub const GAME_STORE_TYPES: &[&str] = {
+    let variants = GameStoreType::VARIANTS;
+    variants
+};
 
 /// Returns the union of item types supported across all search providers,
 /// suitable for use as completion candidates for the `--type` flag.
@@ -139,6 +158,13 @@ impl SimplePluginCommand for Search {
                 "nsfw",
                 "Include NSFW results in MAL searches",
                 None,
+            )
+            .param(
+                Flag::new("provider-direct-id-search")
+                    .short('S')
+                    .arg(SyntaxShape::String)
+                    .desc("For compatible providers, searches using the provided Store's ID instead of a search query")
+                    .completion(Completion::new_list(GAME_STORE_TYPES))
             );
         add_fetch_flags(sig)
             .switch(
@@ -192,12 +218,10 @@ impl SimplePluginCommand for Search {
                 .with_label("missing query", call.head));
             }
             (None, None) => {
-                return Err(
-                    LabeledError::new(
-                        "search query is required unless --type is animelist or mangalist",
-                    )
-                    .with_label("missing query", call.head),
-                );
+                return Err(LabeledError::new(
+                    "search query is required unless --type is animelist or mangalist",
+                )
+                .with_label("missing query", call.head));
             }
         };
         let provider: Option<String> = call.get_flag("provider")?;
@@ -209,6 +233,29 @@ impl SimplePluginCommand for Search {
         let mal_username: Option<String> = call.get_flag("mal-username")?;
         let anilist_username: Option<String> = call.get_flag("anilist-username")?;
         let nsfw = call.has_flag("nsfw")?;
+        let provider_direct_id_search: Option<String> =
+            call.get_flag("provider-direct-id-search")?;
+        debug!(?provider_direct_id_search);
+        let provider_direct_id_search = match provider_direct_id_search {
+            Some(game_store_type) => {
+                debug!(?game_store_type);
+                match GameStoreType::try_from(game_store_type.as_str()) {
+                    Ok(valid_game_store_type) => {
+                        debug!(?valid_game_store_type);
+                        Some(valid_game_store_type)
+                    }
+                    Err(error) => {
+                        error!(
+                            ?error,
+                            "Failed to parse GameStoreType! Not using direct ID search"
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
         let verbose = call.has_flag("verbose")?;
         let head = call.head;
 
@@ -235,6 +282,7 @@ impl SimplePluginCommand for Search {
                 mal_username.as_deref(),
                 anilist_username.as_deref(),
                 nsfw,
+                provider_direct_id_search,
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
 
@@ -256,6 +304,7 @@ async fn run_search(
     mal_username: Option<&str>,
     anilist_username: Option<&str>,
     nsfw: bool,
+    provider_direct_id_search: Option<GameStoreType>,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
@@ -345,8 +394,9 @@ async fn run_search(
         fetch_mode,
         media_type: media_type.map(|s| s.to_string()),
         mal_username: mal_username.map(|s| s.to_string()),
-        anilist_username: anilist_username.map(|s|s.to_string()),
+        anilist_username: anilist_username.map(|s| s.to_string()),
         nsfw,
+        provider_direct_id_search,
     };
 
     dispatcher.search(query, item_type, &options).await

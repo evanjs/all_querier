@@ -1,4 +1,4 @@
-use allq_core::{FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
+use allq_core::{FetchMode, GameStoreType, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::Context;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
@@ -6,8 +6,9 @@ use std::collections::VecDeque;
 use std::ops::DerefMut;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use reqwest::Url;
 use scraper::{ElementRef, Html, Selector};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace, warn};
 
 /// Cargo tables to query and the fields to request from each.
 /// Fields are the exact names as returned by `action=cargofields`.
@@ -148,6 +149,7 @@ impl PcgwSearchProvider {
 
     /// Enforce the 20 req/min rate limit, then perform a GET and return the parsed JSON body.
     /// Every outbound HTTP request to PCGW must go through this method.
+    #[tracing::instrument(skip(self))]
     async fn rate_limited_get(&self, url: &str) -> anyhow::Result<Value> {
         let sleep_for = {
             let mut times = self.request_times.lock().unwrap();
@@ -168,6 +170,7 @@ impl PcgwSearchProvider {
         }
         self.request_times.lock().unwrap().push_back(Instant::now());
 
+        debug!(%url);
         self.client
             .get(url)
             .send()
@@ -178,6 +181,37 @@ impl PcgwSearchProvider {
             .json::<Value>()
             .await
             .context("failed to parse PCGW JSON response")
+    }
+
+    async fn rate_limited_get_url(&self, url: &str) -> anyhow::Result<Url> {
+        let sleep_for = {
+            let mut times = self.request_times.lock().unwrap();
+            let now = Instant::now();
+            while times.front().map_or(false, |t| now.duration_since(*t) >= RATE_LIMIT_WINDOW) {
+                times.pop_front();
+            }
+            if times.len() >= RATE_LIMIT_MAX_REQUESTS {
+                let oldest = *times.front().unwrap();
+                let elapsed = now.duration_since(oldest);
+                RATE_LIMIT_WINDOW.checked_sub(elapsed)
+            } else {
+                None
+            }
+        };
+        if let Some(delay) = sleep_for {
+            tokio::time::sleep(delay).await;
+        }
+        self.request_times.lock().unwrap().push_back(Instant::now());
+
+        Ok(self.client
+            .get(url)
+            .send()
+            .await
+            .context("PCGW request failed")?
+            .error_for_status()
+            .context("PCGW returned error status")?
+            .url()
+            .clone())
     }
 
     /// Query all Cargo tables for `page_title` sequentially, merging results into a single object.
@@ -262,48 +296,8 @@ impl PcgwSearchProvider {
 
         Ok(value)
     }
-}
 
-#[async_trait]
-impl SearchProvider for PcgwSearchProvider {
-    fn name(&self) -> &'static str {
-        "pcgw"
-    }
-
-    fn supported_item_types(&self) -> &[&str] {
-        SUPPORTED_TYPES
-    }
-
-    async fn search(
-        &self,
-        query: &str,
-        item_type: Option<&str>,
-        options: &SearchOptions,
-    ) -> anyhow::Result<Vec<SearchResult>> {
-        // PCGW only indexes video games — skip if the caller asked for a different type.
-        if let Some(t) = item_type {
-            if t != "video-game" {
-                return Ok(Vec::new());
-            }
-        }
-
-        let fetch_mode = options.fetch_mode;
-        let limit = options.limit.unwrap_or(10).min(50);
-        let search_cache_key = format!("pcgw:search:{query}:{limit}");
-
-        // Try to serve the full result list from cache.
-        if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
-            let value: serde_json::Value = serde_json::from_str(&cached)
-                .context("failed to deserialize cached PCGW search results")?;
-            let results: Vec<SearchResult> = serde_json::from_value(value)
-                .context("failed to convert cached PCGW search results")?;
-            return Ok(results);
-        }
-
-        if fetch_mode == FetchMode::CacheOnly {
-            return Ok(Vec::new());
-        }
-
+    async fn get_title_and_id_from_search_query(&self, query: &str, limit: u32) -> anyhow::Result<Vec<Value>> {
         let url = format!(
             "https://www.pcgamingwiki.com/w/api.php\
              ?action=query&list=search&srsearch={}&srlimit={}&format=json",
@@ -316,14 +310,16 @@ impl SearchProvider for PcgwSearchProvider {
         let body: Value = self.rate_limited_get(&url).await
             .context("PCGW search request failed")?;
 
+        // this parses search results and then searches based on title
         let results = body
             .pointer("/query/search")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        Ok(results)
+    }
 
-        let mut out = Vec::with_capacity(results.len());
-
+    async fn process_search_entries(&self, fetch_mode: FetchMode, results: Vec<Value>, out: &mut Vec<SearchResult>) -> anyhow::Result<()> {
         for entry in results {
             let title = match entry.get("title").and_then(Value::as_str) {
                 Some(t) => t.to_string(),
@@ -398,16 +394,187 @@ impl SearchProvider for PcgwSearchProvider {
                 data: Value::Object(data),
             });
         }
+        Ok(())
+    }
 
-        // Cache the assembled result list.
-        if let Ok(json) = serde_json::to_string(&out) {
-            self.cache_insert(search_cache_key, json, fetch_mode).await;
-        }
+    async fn process_data_entry(&self, fetch_mode: FetchMode, parse_data: Value) -> anyhow::Result<SearchResult> {
 
-        Ok(out)
+        let parsed = parse_data.clone();
+        let parsed = parsed.get("parse")
+            .context("Failed to get parse text")?
+            .clone();
+
+        trace!(?parsed);
+        let parsed = parsed.clone();
+        let resolved_title = parsed.clone();
+        let resolved_title = resolved_title.get("title").clone();
+        let resolved_title = resolved_title.and_then(Value::as_str).clone();
+        let resolved_title = resolved_title.as_ref().clone().unwrap_or(&"");
+        debug!(?resolved_title);
+        let resolved_pageid = parsed.get("pageid").and_then(Value::as_u64).unwrap_or_default();
+        debug!(?resolved_pageid);
+
+        // TODO: can/should we do this based on PageID instead?
+        // Fetch structured Cargo data sequentially (rate-limited).
+        let cargo_data = match self.cargo_query_page(&resolved_title, fetch_mode).await {
+            Ok(v) => v,
+            Err(e) => {
+                debug!(error = %e, title = resolved_title, "PCGW Cargo query failed");
+                Value::Object(Map::new())
+            }
+        };
+
+        let mut data = Map::new();
+        let save_game_locations = &mut get_save_game_and_config_locations(&parsed, &cargo_data)?;
+        data.insert("parse".to_string(), parsed);
+        data.insert("cargo".to_string(), cargo_data);
+        data.append(save_game_locations);
+
+        let description = "N/A";
+
+        Ok(SearchResult {
+            provider: "pcgw".to_string(),
+            id: resolved_pageid.to_string(),
+            label: resolved_title.to_string(),
+            description: Some(description.to_string()),
+            item_type: Some("video-game".to_string()),
+            data: Value::Object(data),
+        })
     }
 }
 
+#[async_trait]
+impl SearchProvider for PcgwSearchProvider {
+    fn name(&self) -> &'static str {
+        "pcgw"
+    }
+
+    fn supported_item_types(&self) -> &[&str] {
+        SUPPORTED_TYPES
+    }
+
+    async fn search(
+        &self,
+        query: &str,
+        item_type: Option<&str>,
+        options: &SearchOptions,
+    ) -> anyhow::Result<Vec<SearchResult>> {
+        // PCGW only indexes video games — skip if the caller asked for a different type.
+        if let Some(t) = item_type {
+            if t != "video-game" {
+                return Ok(Vec::new());
+            }
+        }
+
+        debug!(?options);
+
+        let fetch_mode = options.fetch_mode;
+        let limit = options.limit.unwrap_or(10).min(50);
+        let search_cache_key = format!("pcgw:search:{query}:{limit}");
+
+        // Try to serve the full result list from cache.
+        if let Some(cached) = self.cache_get(&search_cache_key, fetch_mode).await {
+            let value: serde_json::Value = serde_json::from_str(&cached)
+                .context("failed to deserialize cached PCGW search results")?;
+            let results: Vec<SearchResult> = serde_json::from_value(value)
+                .context("failed to convert cached PCGW search results")?;
+            return Ok(results);
+        }
+
+        if fetch_mode == FetchMode::CacheOnly {
+            return Ok(Vec::new());
+        }
+
+        let a_results = match &options.provider_direct_id_search {
+            None => {
+                let results = self.get_title_and_id_from_search_query(query, limit).await?;
+                let mut out = Vec::with_capacity(results.len());
+
+                self.process_search_entries(fetch_mode, results, &mut out).await?;
+                out
+            }
+            Some(t) => {
+                let game_page_url = get_url(self, query, limit, options).await?;
+                let data = self.rate_limited_get(&game_page_url.clone()).await?;
+                vec![self.process_data_entry(fetch_mode, data).await?]
+            }
+        };
+
+        // Cache the assembled result list.
+        if let Ok(json) = serde_json::to_string(&a_results) {
+            self.cache_insert(search_cache_key, json, fetch_mode).await;
+        }
+
+        Ok(a_results)
+    }
+}
+
+#[tracing::instrument(skip(provider))]
+async fn get_url(
+    provider: &PcgwSearchProvider,
+    query: &str,
+    limit: u32,
+    search_options: &SearchOptions,
+) -> anyhow::Result<String> {
+    let default_url = format!(
+        "https://www.pcgamingwiki.com/w/api.php\
+             ?action=query&list=search&srsearch={}&srlimit={}&format=json",
+        urlencoding::encode(query),
+        limit,
+    );
+    match search_options.provider_direct_id_search.as_ref() {
+        None => {
+            debug!(%query, %default_url, "Searching by title");
+            warn!("Defaulting!");
+            Ok(default_url)
+        }
+        Some(game_store) => {
+            let redirect_url = match game_store {
+                GameStoreType::Steam => {
+                    debug!(%query, "Searching by Steam App ID");
+                    format!(
+                        "https://www.pcgamingwiki.com/w/api.php\
+                        ?action=cargoquery\
+                        &tables=Infobox_game\
+                        &fields=Infobox_game._pageID%3DPageID%2CInfobox_game.Steam_AppID\
+                        &where=Infobox_game.Steam_AppID%20HOLDS%20%22{query}%22\
+                        &format=json"
+                    )
+                }
+                GameStoreType::Gog => {
+                    debug!(%query, "Searching by GOG ID");
+                    format!(
+                        "https://www.pcgamingwiki.com/w/api.php\
+                        ?action=cargoquery\
+                        &tables=Infobox_game\
+                        &fields=Infobox_game._pageID%3DPageID%2CInfobox_game.GOGcom_ID\
+                        &where=Infobox_game.GOGcom_ID%20HOLDS%20%22{query}%22\
+                        &format=json"
+                    )
+                }
+            };
+            let rurl = provider.rate_limited_get(redirect_url.as_str())
+                .await
+                .inspect_err(|error| {
+                    error!(?error);
+                })
+                .context("Failed to resolve App ID redirect JSON")?;
+            let Some(root_object) = rurl.as_object() else { return Ok(default_url) };
+            let Some(cargoquery) = root_object.get("cargoquery") else { return Ok(default_url) };
+            debug!(%cargoquery);
+            let Some(titles) = cargoquery.as_array() else { return Ok(default_url) };
+            let Some(first_result) = titles.first() else { return Ok(default_url) };
+            let Some(title) = first_result.get("title") else { return Ok(default_url) };
+            let Some(page_id_value) = title.get("PageID") else { return Ok(default_url) };
+            let Some(page_id) = page_id_value.as_str() else { return Ok(default_url) };
+            Ok(format!(
+                "https://www.pcgamingwiki.com/w/api.php\
+        ?action=parse&format=json&pageid={}&format=json",
+                urlencoding::encode(page_id),
+            ))
+        }
+    }
+}
 
 fn get_save_game_and_config_locations(parse_data: &Value, cargo_data: &Value) -> anyhow::Result<Map<String, Value>> {
     debug!(

@@ -7,7 +7,7 @@ use clap::{
 };
 use serde_json::to_string;
 use tracing::{debug, warn};
-use allq_core::{FetchMode, SearchDispatcher, SearchOptions, SearchResult};
+use allq_core::{FetchMode, GameStoreType, SearchDispatcher, SearchOptions, SearchResult};
 use allq_query::{
     FetchArgs,
     WikidataQueryOptions,
@@ -164,6 +164,9 @@ enum Command {
         /// Include NSFW results in MAL searches
         #[arg(long)]
         nsfw: bool,
+
+        #[arg(long)]
+        provider_direct_id_search: Option<GameStoreType>,
 
         /// Enable verbose diagnostic logging to stderr
         #[arg(short, long)]
@@ -351,6 +354,7 @@ async fn try_main() -> anyhow::Result<()> {
             mal_username,
             anilist_username,
             nsfw,
+            provider_direct_id_search,
             verbose: _,
         } => {
             let fetch_mode = if fetch.cache_only {
@@ -382,6 +386,7 @@ async fn try_main() -> anyhow::Result<()> {
                 mal_username.as_deref(),
                 anilist_username.as_deref(),
                 nsfw,
+                provider_direct_id_search
             )
             .await?;
 
@@ -470,6 +475,7 @@ async fn run_search(
     mal_username: Option<&str>,
     anilist_username: Option<&str>,
     nsfw: bool,
+    provider_direct_id_search: Option<GameStoreType>
 ) -> anyhow::Result<Vec<SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
     //let mut caches = Vec::new();
@@ -543,6 +549,7 @@ async fn run_search(
         mal_username: mal_username.map(|s| s.to_string()),
         anilist_username: anilist_username.map(|s|s.to_string()),
         nsfw,
+        provider_direct_id_search
     };
 
     let results = dispatcher.search(query, item_type, &options).await?;
