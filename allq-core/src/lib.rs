@@ -4,11 +4,19 @@ pub mod dispatcher;
 use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use strum_macros::{VariantNames, EnumString};
+use derive_more::FromStr;
 
 pub use cache::{ProviderCache, all_querier_cache_dir, create_provider_cache};
 pub use dispatcher::SearchDispatcher;
 
 pub const REQWEST_VERSION: &str = env!("REQWEST_VERSION");
+
+#[derive(Debug, Clone, VariantNames, EnumString)]
+pub enum GameStoreType {
+    Steam,
+    Gog
+}
 
 /// Controls how a provider resolves requests relative to its local cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -39,6 +47,7 @@ pub struct SearchOptions {
     pub anilist_username: Option<String>,
     /// Include NSFW results (passed to MAL `.nsfw()` parameter).
     pub nsfw: bool,
+    pub provider_direct_id_search: Option<GameStoreType>
 }
 
 /// A provider-agnostic search result envelope.

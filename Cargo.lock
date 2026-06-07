@@ -97,10 +97,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "cargo_toml",
+ "derive_more",
  "dirs",
  "foyer",
  "serde",
  "serde_json",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
  "tracing",
 ]
 
@@ -3531,6 +3534,7 @@ dependencies = [
  "nu-plugin-test-support",
  "nu-protocol",
  "serde_json",
+ "strum 0.28.0",
  "tokio",
  "tracing",
  "tracing-subscriber",
