@@ -485,7 +485,7 @@ impl SearchProvider for PcgwSearchProvider {
             return Ok(Vec::new());
         }
 
-        let a_results = match &options.provider_direct_id_search {
+        let game_entries = match &options.provider_direct_id_search {
             None => {
                 let results = self.get_title_and_id_from_search_query(query, limit).await?;
                 let mut out = Vec::with_capacity(results.len());
@@ -501,11 +501,11 @@ impl SearchProvider for PcgwSearchProvider {
         };
 
         // Cache the assembled result list.
-        if let Ok(json) = serde_json::to_string(&a_results) {
+        if let Ok(json) = serde_json::to_string(&game_entries) {
             self.cache_insert(search_cache_key, json, fetch_mode).await;
         }
 
-        Ok(a_results)
+        Ok(game_entries)
     }
 }
 
@@ -553,13 +553,13 @@ async fn get_url(
                     )
                 }
             };
-            let rurl = provider.rate_limited_get(redirect_url.as_str())
+            let redirect_url = provider.rate_limited_get(redirect_url.as_str())
                 .await
                 .inspect_err(|error| {
                     error!(?error);
                 })
                 .context("Failed to resolve App ID redirect JSON")?;
-            let Some(root_object) = rurl.as_object() else { return Ok(default_url) };
+            let Some(root_object) = redirect_url.as_object() else { return Ok(default_url) };
             let Some(cargoquery) = root_object.get("cargoquery") else { return Ok(default_url) };
             debug!(%cargoquery);
             let Some(titles) = cargoquery.as_array() else { return Ok(default_url) };
@@ -695,17 +695,18 @@ fn get_save_game_location_and_configuration_data(data: &str) -> anyhow::Result<V
     )
 }
 
-// TODO: this only presents <th> values right now
-//   we don't present any "translated" form of the <td> cells at the moment
-//   This makes the information near useless
-//   The icons presented on the Wiki will map to "Native", "Unknown", "No Native Support", etc.
-//   These values should be presented in a "Native" column alongside "System" to indicate
-//   the associated level of support
-//   e.g.: "System, Native, Notes"
-//         "Steam Cloud, No Native Support,null"
 fn get_save_game_cloud_syncing_data(data: &str) -> anyhow::Result<Value> {
-    // headers (tr): System, Location, Notes
-    // possible rows (th) GOG Galaxy, Steam
+    // NOTE: this data is also provided by Cargo
+    //  See: cargo > Cloud
+    //  Example output:
+    //  {
+    //    "Steam": "false",
+    //    "GOG Galaxy": null,
+    //    "Epic Games Launcher": null,
+    //    "Xbox": null
+    //  }
+    //  However, this data does not include notes for the associated system type
+
     extract_pcgw_tables(data, &["Save game cloud syncing"])
 }
 
