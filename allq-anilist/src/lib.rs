@@ -10,6 +10,7 @@ use anilist_moe::AniListClient;
 use anilist_moe::endpoints::character::FetchCharacterOptions;
 use anilist_moe::endpoints::media::FetchMediaOptions;
 use anilist_moe::endpoints::MediaListEndpoint;
+use anilist_moe::endpoints::staff::FetchStaffOptions;
 use anilist_moe::endpoints::user::FetchUserMediaListOptions;
 use anilist_moe::enums::media::MediaType;
 use anilist_moe::enums::media_list::MediaListStatus;
@@ -224,6 +225,10 @@ impl AniListProvider {
 
                 let mut fetch_options = self.get_default_fetch_media_options();
                 fetch_options.search = Some(query.to_string());
+                fetch_options.include_characters = Some(true);
+                fetch_options.include_staff = Some(true);
+                fetch_options.characters_per_page = Some(50);
+                fetch_options.staff_per_page = Some(50);
                 fetch_options.per_page = Some(options.limit.unwrap_or(10u32) as i32);
                 fetch_options.page = Some(1);
 
@@ -302,13 +307,15 @@ impl AniListProvider {
             ?limit,
             "Searching for staff on AniList"
         );
+        let mut fetch_options = FetchStaffOptions::default();
+        fetch_options.search = Some(query.to_string());
+        fetch_options.include_characters = Some(true);
+        fetch_options.include_character_media = Some(true);
+        fetch_options.include_staff_media = Some(true);
+        fetch_options.per_page = Option::from(limit as i32);
         let staff_results = self.client
             .staff()
-            .search(
-                query, // query
-                Some(1), // page number
-                Some(limit as i32) // number of results per page
-            )
+            .fetch(&fetch_options)
             .await;
 
         let staff_results = match staff_results {
@@ -353,6 +360,7 @@ impl AniListProvider {
         let mut fetch_options = FetchCharacterOptions::default();
         fetch_options.search = Some(query.to_string());
         fetch_options.include_media = Some(true);
+        fetch_options.media_per_page = Some(50);
         fetch_options.per_page = Option::from(limit as i32);
         let character_results = self.client
             .character()
