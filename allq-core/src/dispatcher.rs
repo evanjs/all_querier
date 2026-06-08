@@ -1,4 +1,4 @@
-use crate::{SearchOptions, SearchProvider, SearchResult};
+use crate::{GameSearchOptions, SearchOptions, SearchProvider, SearchResult};
 
 /// Holds multiple [`SearchProvider`] implementations and fans out queries.
 pub struct SearchDispatcher {
@@ -44,6 +44,38 @@ impl SearchDispatcher {
                 results.extend(provider_results);
             }
         }
+        Ok(results)
+    }
+
+    /// Search all registered providers that support video games.
+    ///
+    /// Results are collected sequentially for now; parallel fan-out can be
+    /// added later via `tokio::join!` or `futures::join_all`.
+    pub async fn search_games(
+        &self,
+        query: &str,
+        options: &GameSearchOptions,
+    ) -> anyhow::Result<Vec<SearchResult>> {
+        let mut results = Vec::new();
+        let search_options = SearchOptions::from(options.clone());
+
+        for provider in &self.providers {
+            if !provider.supported_item_types().contains(&"video-game") {
+                continue;
+            }
+
+            tracing::debug!("Searching provider: {}", provider.name());
+            let provider_results = provider
+                .search(query, Some("video-game"), &search_options)
+                .await?;
+            tracing::debug!(
+                "Provider {} returned {} results",
+                provider.name(),
+                provider_results.len()
+            );
+            results.extend(provider_results);
+        }
+
         Ok(results)
     }
 

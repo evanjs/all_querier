@@ -50,6 +50,31 @@ pub struct SearchOptions {
     pub provider_direct_id_search: Option<GameStoreType>
 }
 
+/// Options that control search behavior (e.g. provider_id_direct_search).
+#[derive(Debug, Clone, Default)]
+pub struct GameSearchOptions {
+    /// Maximum number of results to return.
+    pub limit: Option<u32>,
+    /// Language code for labels/descriptions (e.g. "en").
+    pub language: Option<String>,
+    /// How to resolve requests relative to the local cache.
+    pub fetch_mode: FetchMode,
+    /// Include NSFW results (passed to MAL `.nsfw()` parameter).
+    // pub nsfw: bool,
+    pub provider_direct_id_search: Option<GameStoreType>
+}
+
+impl From<SearchOptions> for GameSearchOptions {
+    fn from(value: SearchOptions) -> Self {
+        GameSearchOptions {
+            limit: value.limit,
+            language: value.language,
+            fetch_mode: value.fetch_mode,
+            provider_direct_id_search: value.provider_direct_id_search,
+        }
+    }
+}
+
 /// A provider-agnostic search result envelope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -96,6 +121,62 @@ pub trait SearchProvider: Send + Sync {
         item_type: Option<&str>,
         options: &SearchOptions,
     ) -> anyhow::Result<Vec<SearchResult>>;
+}
+
+pub const GAME_SEARCH_SUPPORTED_TYPES: &[&str] = &["video-game"];
+
+#[async_trait]
+pub trait GameSearchProvider: Send + Sync {
+    fn name(&self) -> &'static str;
+
+    async fn search_games(
+        &self,
+        query: &str,
+        options: &GameSearchOptions,
+    ) -> anyhow::Result<Vec<SearchResult>>;
+}
+
+impl From<GameSearchOptions> for SearchOptions {
+    fn from(value: GameSearchOptions) -> Self {
+        Self {
+            limit: value.limit,
+            language: value.language,
+            fetch_mode: value.fetch_mode,
+            media_type: None,
+            mal_username: None,
+            anilist_username: None,
+            nsfw: false,
+            provider_direct_id_search: value.provider_direct_id_search,
+        }
+    }
+}
+
+#[async_trait]
+impl<T> SearchProvider for T
+where
+    T: GameSearchProvider + ?Sized,
+{
+    fn name(&self) -> &'static str {
+        GameSearchProvider::name(self)
+    }
+
+    fn supported_item_types(&self) -> &[&str] {
+        GAME_SEARCH_SUPPORTED_TYPES
+    }
+
+    async fn search(
+        &self,
+        query: &str,
+        item_type: Option<&str>,
+        options: &SearchOptions,
+    ) -> anyhow::Result<Vec<SearchResult>> {
+        if item_type.is_some_and(|item_type| item_type != "video-game") {
+            return Ok(Vec::new());
+        }
+
+        let options = GameSearchOptions::from(options.clone());
+        self.search_games(query, &options).await
+    }
 }
 
 pub fn all_querier_data_dir() -> Option<PathBuf> {

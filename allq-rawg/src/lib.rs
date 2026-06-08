@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{debug, trace};
-use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
+use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, GameSearchOptions, GameSearchProvider, ProviderCache, SearchOptions, SearchResult};
 use crate::apis::configuration::Configuration;
 
 pub mod apis;
@@ -105,22 +105,17 @@ pub fn get_config() -> Result<RawgConfig> {
 }
 
 #[async_trait]
-impl SearchProvider for RawgProvider {
+impl GameSearchProvider for RawgProvider {
     fn name(&self) -> &'static str {
         "rawg"
     }
 
-    fn supported_item_types(&self) -> &[&str] {
-        SUPPORTED_TYPES
-    }
-
-    async fn search(
+    async fn search_games(
         &self,
         query: &str,
-        item_type: Option<&str>,
-        options: &SearchOptions,
+        options: &GameSearchOptions,
     ) -> Result<Vec<SearchResult>> {
-        let itype = item_type.unwrap_or("default_type");
+        let itype = "video-game";
         let limit = options.limit.unwrap_or(10);
 
         debug!(

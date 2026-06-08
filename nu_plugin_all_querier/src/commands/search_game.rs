@@ -7,16 +7,11 @@ use tracing::{debug, error, warn};
 use crate::{
     AllQuerierPlugin, init_logging, labeled_error, serde_json_to_nu_value, user_agent_email,
 };
-use allq_anilist::{AniListProvider, SUPPORTED_TYPES as ANILIST_SUPPORTED_TYPES};
-use allq_core::{FetchMode, GameStoreType, SearchDispatcher, SearchOptions};
+use allq_core::{FetchMode, GameSearchOptions, GameStoreType, SearchDispatcher, SearchOptions};
 use allq_igdb::{IGDBProvider, SUPPORTED_TYPES as IGDB_SUPPORTED_TYPES};
-use allq_itis::{ItisProvider, SUPPORTED_TYPES as ITIS_SUPPORTED_TYPES};
-use allq_jikan::JikanProvider;
-use allq_mal::{MAL_MEDIA_TYPES, SUPPORTED_TYPES as MAL_SUPPORTED_TYPES};
-use allq_musicbrainz::{MusicBrainzSearchProvider, SUPPORTED_TYPES as MUSICBRAINZ_SUPPORTED_TYPES};
 use allq_pcgw::{PcgwSearchProvider, SUPPORTED_TYPES as PCGW_SUPPORTED_TYPES};
-use allq_query::{add_fetch_flags, read_fetch_args};
 use allq_rawg::{RawgProvider, SUPPORTED_TYPES as RAWG_SUPPORTED_TYPES};
+use allq_query::{add_fetch_flags, read_fetch_args};
 use allq_wikidata::{CURATED_WIKIDATA_ITEM_TYPE_KEYS, WikidataSearchProvider};
 use nu_plugin::{EngineInterface, EvaluatedCall, SimplePluginCommand};
 use nu_protocol::{
@@ -36,15 +31,10 @@ fn runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
 
 /// Static list of provider names supported by the `search` command.
 pub const SEARCH_PROVIDER_NAMES: &[&str] = &[
-    "musicbrainz",
     "wikidata",
     "pcgw",
-    "myanimelist",
-    "jikan",
-    "anilist",
-    "itis",
     "rawg",
-    "igdb",
+    "igdb"
 ];
 
 /// Returns the union of item types supported across all search providers,
@@ -53,32 +43,12 @@ fn search_item_type_completions() -> &'static [&'static str] {
     static CACHED: OnceLock<Vec<&'static str>> = OnceLock::new();
     CACHED.get_or_init(|| {
         let mut types: Vec<&'static str> = Vec::new();
-        for &t in MUSICBRAINZ_SUPPORTED_TYPES {
-            if !types.contains(&t) {
-                types.push(t);
-            }
-        }
         for &t in CURATED_WIKIDATA_ITEM_TYPE_KEYS {
             if !types.contains(&t) {
                 types.push(t);
             }
         }
         for &t in PCGW_SUPPORTED_TYPES {
-            if !types.contains(&t) {
-                types.push(t);
-            }
-        }
-        for &t in MAL_SUPPORTED_TYPES {
-            if !types.contains(&t) {
-                types.push(t);
-            }
-        }
-        for &t in ANILIST_SUPPORTED_TYPES {
-            if !types.contains(&t) {
-                types.push(t);
-            }
-        }
-        for &t in ITIS_SUPPORTED_TYPES {
             if !types.contains(&t) {
                 types.push(t);
             }
@@ -97,13 +67,13 @@ fn search_item_type_completions() -> &'static [&'static str] {
     })
 }
 
-pub struct Search;
+pub struct SearchGame;
 
-impl SimplePluginCommand for Search {
+impl SimplePluginCommand for SearchGame {
     type Plugin = AllQuerierPlugin;
 
     fn name(&self) -> &str {
-        "search"
+        "search game"
     }
 
     fn signature(&self) -> Signature {
@@ -111,20 +81,13 @@ impl SimplePluginCommand for Search {
             .optional(
                 "query",
                 SyntaxShape::String,
-                "Free-text search query, e.g. 'OK Computer'. Optional for animelist/mangalist.",
-            )
-            .param(
-                Flag::new("type")
-                    .short('t')
-                    .arg(SyntaxShape::String)
-                    .desc("Item type to search for (e.g. album, artist, song, character, video-game)")
-                    .completion(Completion::new_list(search_item_type_completions())),
+                "Free-text search query, e.g. 'Book of Hours'",
             )
             .param(
                 Flag::new("provider")
                     .short('p')
                     .arg(SyntaxShape::String)
-                    .desc("Restrict search to a single provider (e.g. musicbrainz, wikidata)")
+                    .desc("Restrict search to a single provider (e.g. PCGW, IGDB, RAWG)")
                     .completion(Completion::new_list(SEARCH_PROVIDER_NAMES)),
             )
             .named(
@@ -133,28 +96,11 @@ impl SimplePluginCommand for Search {
                 "Maximum number of results per provider",
                 Some('n'),
             )
-            .param(
-                Flag::new("media-type")
-                    .short('m')
-                    .arg(SyntaxShape::String)
-                    .desc("Filter MAL results by media sub-type (e.g. tv, ova, movie, manga, novel)")
-                    .completion(Completion::new_list(MAL_MEDIA_TYPES)),
-            )
-            .param(
-                Flag::new("mal-username")
-                    .arg(SyntaxShape::String)
-                    .desc("Use a specific MyAnimeList username for animelist or mangalist searches"),
-            )
-            .param(
-                Flag::new("anilist-username")
-                    .arg(SyntaxShape::String)
-                    .desc("Use a specific AniList username for animelist or mangalist searches"),
-            )
-            .switch(
-                "nsfw",
-                "Include NSFW results in MAL searches",
-                None,
-            )
+            // .switch(
+            //     "nsfw",
+            //     "Include NSFW results in searches",
+            //     None,
+            // )
             .param(
                 Flag::new("provider-direct-id-search")
                     .short('S')
@@ -172,21 +118,11 @@ impl SimplePluginCommand for Search {
     }
 
     fn description(&self) -> &str {
-        "Search across multiple providers (MusicBrainz, Wikidata) for items by type"
+        "Search across multiple providers (PCGW, IGDB, RAWG) for items by type"
     }
 
     fn examples(&self) -> Vec<Example> {
         vec![
-            Example {
-                example: r#"search "...Like Clockwork" --type album"#,
-                description: "Search for an album across MusicBrainz and Wikidata",
-                result: None,
-            },
-            Example {
-                example: r#"search "Queens of the Stone Ago" --type artist --provider musicbrainz"#,
-                description: "Search for an artist on MusicBrainz only",
-                result: None,
-            },
             Example {
                 example: r#"search "Dredge" --type video-game"#,
                 description: "Search for a video game (Wikidata has good game coverage)",
@@ -205,18 +141,12 @@ impl SimplePluginCommand for Search {
         let item_type: Option<String> = call.get_flag("type")?;
         let query = match (call.opt::<String>(0)?, item_type.as_deref()) {
             (Some(query), _) => query,
-            // Search query is not required for animelist nor mangalist
-            (None, Some("animelist" | "mangalist")) => String::new(),
             (None, Some(item_type)) => {
-                return Err(LabeledError::new(format!(
-                    "search query is required unless --type is animelist or mangalist (got {item_type})"
-                ))
+                return Err(LabeledError::new("search query is required".to_string())
                 .with_label("missing query", call.head));
             }
             (None, None) => {
-                return Err(LabeledError::new(
-                    "search query is required unless --type is animelist or mangalist",
-                )
+                return Err(LabeledError::new("search query is required", )
                 .with_label("missing query", call.head));
             }
         };
@@ -225,10 +155,7 @@ impl SimplePluginCommand for Search {
             .get_flag::<i64>("limit")?
             .and_then(|l| u32::try_from(l).ok());
         let fetch = read_fetch_args(call).map_err(|e| e)?;
-        let media_type: Option<String> = call.get_flag("media-type")?;
-        let mal_username: Option<String> = call.get_flag("mal-username")?;
-        let anilist_username: Option<String> = call.get_flag("anilist-username")?;
-        let nsfw = call.has_flag("nsfw")?;
+        // let nsfw = call.has_flag("nsfw")?;
         let provider_direct_id_search: Option<String> =
             call.get_flag("provider-direct-id-search")?;
         debug!(?provider_direct_id_search);
@@ -270,14 +197,10 @@ impl SimplePluginCommand for Search {
             .map_err(|e| labeled_error(head, "Failed to create Tokio runtime", e))?
             .block_on(run_search(
                 &query,
-                item_type.as_deref(),
                 provider.as_deref(),
                 limit,
                 fetch_mode,
-                media_type.as_deref(),
-                mal_username.as_deref(),
-                anilist_username.as_deref(),
-                nsfw,
+                // nsfw,
                 provider_direct_id_search,
             ))
             .map_err(|e| labeled_error(head, "Search failed", e))?;
@@ -292,24 +215,15 @@ impl SimplePluginCommand for Search {
 
 async fn run_search(
     query: &str,
-    item_type: Option<&str>,
     provider_filter: Option<&str>,
     limit: Option<u32>,
     fetch_mode: FetchMode,
-    media_type: Option<&str>,
-    mal_username: Option<&str>,
-    anilist_username: Option<&str>,
-    nsfw: bool,
+    // nsfw: bool,
     provider_direct_id_search: Option<GameStoreType>,
 ) -> anyhow::Result<Vec<allq_core::SearchResult>> {
     let mut dispatcher = SearchDispatcher::new();
 
     let should_add = |name: &str| provider_filter.map_or(true, |f| f == name);
-    if should_add("musicbrainz") {
-        let cache = allq_core::create_provider_cache("musicbrainz").await?;
-        dispatcher.add_provider(Box::new(MusicBrainzSearchProvider::new_with_cache(&user_agent_email(), cache)));
-    }
-
     if should_add("wikidata") {
         let client = allq_wikidata::WikidataClient::new().await?;
         dispatcher.add_provider(Box::new(WikidataSearchProvider::new(client)));
@@ -317,40 +231,10 @@ async fn run_search(
 
     if should_add("pcgw") {
         let cache = allq_core::create_provider_cache("pcgw").await?;
-        dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(&user_agent_email(), cache)));
-    }
-
-    if should_add("jikan") {
-        let cache = allq_core::create_provider_cache("jikan").await?;
-        dispatcher.add_provider(Box::new(JikanProvider::new_with_cache(cache)))
-    }
-
-    if should_add("anilist") {
-        let cache = allq_core::create_provider_cache("anilist").await?;
-        dispatcher.add_provider(Box::new(AniListProvider::new_with_cache(cache)))
-    }
-
-    if should_add("myanimelist") {
-        let _cache = allq_core::create_provider_cache("myanimelist").await?;
-        match allq_mal::MalProvider::new() {
-            Ok(mal_provider) => {
-                dispatcher.add_provider(Box::new(mal_provider));
-            }
-            Err(e) => {
-                debug!("Failed to initialize MAL provider, skipping: {}", e);
-            }
-        }
-    }
-
-    if should_add("itis") {
-        match allq_itis::ItisProvider::new() {
-            Ok(itis_provider) => {
-                dispatcher.add_provider(Box::new(itis_provider));
-            }
-            Err(e) => {
-                debug!("Failed to initialize ITIS provider, skipping: {}", e);
-            }
-        }
+        dispatcher.add_provider(Box::new(PcgwSearchProvider::new_with_cache(
+            &user_agent_email(),
+            cache,
+        )));
     }
 
     if should_add("rawg") {
@@ -358,7 +242,7 @@ async fn run_search(
         match RawgProvider::new_with_cache(cache) {
             Ok(rawg_provider) => {
                 dispatcher.add_provider(Box::new(rawg_provider));
-            },
+            }
             Err(e) => {
                 debug!("Failed to initialize RAWG provider, skipping: {}", e);
             }
@@ -379,21 +263,18 @@ async fn run_search(
 
     if dispatcher.provider_names().is_empty() {
         anyhow::bail!(
-            "no providers match filter {:?}. Available: musicbrainz, wikidata, pcgw, myanimelist",
+            "no providers match filter {:?}. Available: pcgw, igdb, rawg, wikidata",
             provider_filter
         );
     }
 
-    let options = SearchOptions {
+    let options = GameSearchOptions {
         limit,
         language: Some("en".to_string()),
         fetch_mode,
-        media_type: media_type.map(|s| s.to_string()),
-        mal_username: mal_username.map(|s| s.to_string()),
-        anilist_username: anilist_username.map(|s| s.to_string()),
-        nsfw,
+        // nsfw,
         provider_direct_id_search,
     };
 
-    dispatcher.search(query, item_type, &options).await
+    dispatcher.search_games(query, &options).await
 }

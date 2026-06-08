@@ -100,6 +100,7 @@ impl Plugin for AllQuerierPlugin {
             Box::new(ListProviders),
             Box::new(QueryWikidata),
             Box::new(Search),
+            Box::new(SearchGame),
         ]
     }
 }

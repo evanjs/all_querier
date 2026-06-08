@@ -6,7 +6,7 @@ extern crate serde_json;
 extern crate serde_repr;
 extern crate url;
 
-use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, ProviderCache, SearchOptions, SearchProvider, SearchResult};
+use allq_core::{all_querier_cache_dir, all_querier_data_dir, FetchMode, GameSearchOptions, GameSearchProvider, ProviderCache, SearchOptions, SearchProvider, SearchResult};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use igdb_atlas::endpoints::traits::{Endpoint, NameFilterable, Searchable};
@@ -23,7 +23,7 @@ pub(crate) const LINK_ALIASES: &[&str] = &[
     "igdb",
 ];
 
-/// A `SearchProvider` backed by the IGDBProvider API.
+/// A `GameSearchProvider` backed by the IGDBProvider API.
 pub struct IGDBProvider {
     cache: Option<ProviderCache>,
 }
@@ -58,7 +58,7 @@ impl IGDBProvider {
         }
     }
 
-    async fn search_game(&self, client: &IGDBClient, query: &str, search_options: &SearchOptions) -> Result<Vec<igdb_atlas::Game>> {
+    async fn search_game(&self, client: &IGDBClient, query: &str, search_options: &GameSearchOptions) -> Result<Vec<igdb_atlas::Game>> {
         // TODO: make this customizable
         client
             .games()
@@ -168,22 +168,17 @@ impl TryInto<ClientConfig> for IGDBConfig {
 }
 
 #[async_trait]
-impl SearchProvider for IGDBProvider {
+impl GameSearchProvider for IGDBProvider {
     fn name(&self) -> &'static str {
         "igdb"
     }
 
-    fn supported_item_types(&self) -> &[&str] {
-        SUPPORTED_TYPES
-    }
-
-    async fn search(
+    async fn search_games(
         &self,
         query: &str,
-        item_type: Option<&str>,
-        options: &SearchOptions,
+        options: &GameSearchOptions,
     ) -> Result<Vec<SearchResult>> {
-        let itype = item_type.unwrap_or("default_type");
+        let itype = "video-game";
         let limit = options.limit.unwrap_or(10);
 
         debug!(
